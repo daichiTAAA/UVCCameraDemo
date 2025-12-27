@@ -3,9 +3,12 @@ package com.example.uvccamerademo
 import android.Manifest
 import android.content.pm.PackageManager
 import android.hardware.usb.UsbDevice
+import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.widget.MediaController
+import android.widget.VideoView
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -52,10 +55,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
-import androidx.core.net.toUri
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
+import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import com.example.uvccamerademo.ui.theme.UVCCameraDemoTheme
@@ -66,6 +70,7 @@ import com.jiangdg.ausbc.camera.CameraUvcStrategy
 import com.jiangdg.ausbc.camera.bean.CameraRequest
 import com.jiangdg.ausbc.widget.AspectRatioTextureView
 import com.serenegiant.usb.USBMonitor
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -154,6 +159,7 @@ private fun UvcPreviewScreen(
     var statusMessage by remember { mutableStateOf("Idle") }
     var isCameraOpened by remember { mutableStateOf(false) }
     var isRecording by remember { mutableStateOf(false) }
+    var isFinalizing by remember { mutableStateOf(false) }
     var recordingStartAt by remember { mutableStateOf<Long?>(null) }
     var recordingElapsedMs by remember { mutableStateOf(0L) }
     var pendingOpen by remember { mutableStateOf(false) }
@@ -212,6 +218,7 @@ private fun UvcPreviewScreen(
             cameraClient.captureVideoStop()
             isRecording = false
             recordingStartAt = null
+            isFinalizing = true
             statusMessage = "Stopping recording..."
         }
     }
@@ -226,6 +233,7 @@ private fun UvcPreviewScreen(
             statusMessage = "Storage not available"
             return@startRecording
         }
+        isFinalizing = false
         recordingStartAt = System.currentTimeMillis()
         recordingElapsedMs = 0L
         isRecording = true
@@ -245,6 +253,7 @@ private fun UvcPreviewScreen(
                     mainHandler.post {
                         isRecording = false
                         recordingStartAt = null
+                        isFinalizing = false
                         statusMessage = "Recording failed: ${error ?: "Unknown error"}"
                     }
                 }
@@ -253,6 +262,7 @@ private fun UvcPreviewScreen(
                     mainHandler.post {
                         isRecording = false
                         recordingStartAt = null
+                        isFinalizing = false
                         statusMessage = "Saved: ${path ?: "Unknown path"}"
                     }
                 }
@@ -439,7 +449,7 @@ private fun UvcPreviewScreen(
                     isCameraOpened = false
                     statusMessage = "Closed"
                 },
-                enabled = isCameraOpened
+                enabled = isCameraOpened && !isFinalizing
             ) {
                 Text("Close")
             }
@@ -460,7 +470,7 @@ private fun UvcPreviewScreen(
                         recordPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                     }
                 },
-                enabled = isCameraOpened
+                enabled = isCameraOpened && !isFinalizing
             ) {
                 Text(if (isRecording) "Stop" else "Record")
             }
@@ -470,11 +480,11 @@ private fun UvcPreviewScreen(
                 val selected = option == selectedResolution
                 val action = { applyResolution(option) }
                 if (selected) {
-                    Button(onClick = action, enabled = !isRecording) {
+                    Button(onClick = action, enabled = !isRecording && !isFinalizing) {
                         Text(option.label)
                     }
                 } else {
-                    OutlinedButton(onClick = action, enabled = !isRecording) {
+                    OutlinedButton(onClick = action, enabled = !isRecording && !isFinalizing) {
                         Text(option.label)
                     }
                 }
@@ -484,7 +494,7 @@ private fun UvcPreviewScreen(
             OutlinedButton(onClick = { refreshDevices() }) {
                 Text("Refresh Devices")
             }
-            OutlinedButton(onClick = onOpenRecordings, enabled = !isRecording) {
+            OutlinedButton(onClick = onOpenRecordings, enabled = !isRecording && !isFinalizing) {
                 Text("Recordings")
             }
             if (deviceList.isEmpty()) {
@@ -642,19 +652,81 @@ private fun PlaybackScreen(
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var deleteConfirm by remember { mutableStateOf(false) }
-    val exoPlayer = remember(item.path) {
-        ExoPlayer.Builder(context)
-            .build()
-            .apply {
-                setMediaItem(MediaItem.fromUri(item.path.toUri()))
-                prepare()
-                playWhenReady = true
-            }
+    var playableItem by remember { mutableStateOf(item) }
+    var isRepairing by remember { mutableStateOf(true) }
+    var playbackToken by remember { mutableStateOf(0) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+    var attemptedRepair by remember { mutableStateOf(false) }
+    var usePlatformPlayer by remember { mutableStateOf(false) }
+    var videoViewRef by remember { mutableStateOf<VideoView?>(null) }
+
+    LaunchedEffect(item.path) {
+        isRepairing = true
+        errorMessage = null
+        attemptedRepair = false
+        usePlatformPlayer = false
+        val repaired = repository.prepareForPlayback(item)
+        playableItem = repaired
+        playbackToken += 1
+        isRepairing = false
     }
 
-    DisposableEffect(exoPlayer) {
-        onDispose { exoPlayer.release() }
+    val exoPlayer = remember(playableItem.path, playbackToken, isRepairing, usePlatformPlayer) {
+        if (isRepairing || usePlatformPlayer) {
+            null
+        } else {
+            ExoPlayer.Builder(context)
+                .build()
+                .apply {
+                    setMediaItem(MediaItem.fromUri(Uri.fromFile(File(playableItem.path))))
+                    prepare()
+                    playWhenReady = true
+                }
+        }
+    }
+
+    if (exoPlayer != null) {
+        DisposableEffect(exoPlayer) {
+            val listener = object : Player.Listener {
+                override fun onPlayerError(error: PlaybackException) {
+                    if (attemptedRepair) {
+                        errorMessage = "ExoPlayer failed: ${error.errorCodeName}"
+                        usePlatformPlayer = true
+                        return
+                    }
+                    attemptedRepair = true
+                    errorMessage = "Repairing file..."
+                    exoPlayer.stop()
+                    scope.launch {
+                        isRepairing = true
+                        val repaired = repository.forceVideoOnlyRepair(playableItem)
+                        if (repaired != null) {
+                            playableItem = repaired
+                            playbackToken += 1
+                            errorMessage = null
+                        } else {
+                            errorMessage = "Playback failed: ${error.errorCodeName}"
+                            usePlatformPlayer = true
+                        }
+                        isRepairing = false
+                    }
+                }
+            }
+            exoPlayer.addListener(listener)
+            onDispose {
+                exoPlayer.removeListener(listener)
+                exoPlayer.release()
+            }
+        }
+    }
+
+    DisposableEffect(usePlatformPlayer) {
+        onDispose {
+            videoViewRef?.stopPlayback()
+            videoViewRef = null
+        }
     }
 
     if (deleteConfirm) {
@@ -665,7 +737,8 @@ private fun PlaybackScreen(
             confirmButton = {
                 TextButton(
                     onClick = {
-                        exoPlayer.stop()
+                        exoPlayer?.stop()
+                        videoViewRef?.stopPlayback()
                         repository.deleteRecording(item)
                         deleteConfirm = false
                         onBack()
@@ -689,18 +762,60 @@ private fun PlaybackScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Text(text = "Playback", style = MaterialTheme.typography.titleLarge)
-        Text(text = item.name, style = MaterialTheme.typography.bodySmall)
-        AndroidView(
-            modifier = Modifier
-                .fillMaxWidth()
-                .aspectRatio(16f / 9f),
-            factory = {
-                PlayerView(it).apply {
-                    player = exoPlayer
-                    useController = true
+        Text(text = playableItem.name, style = MaterialTheme.typography.bodySmall)
+        if (errorMessage != null) {
+            Text(text = errorMessage!!, color = MaterialTheme.colorScheme.error)
+        }
+        if (isRepairing) {
+            Text(text = "Preparing video...", style = MaterialTheme.typography.bodySmall)
+        }
+        if (usePlatformPlayer) {
+            Text(text = "Using system player", style = MaterialTheme.typography.bodySmall)
+            AndroidView(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(16f / 9f),
+                factory = { viewContext ->
+                    VideoView(viewContext).apply {
+                        val controller = MediaController(viewContext)
+                        controller.setAnchorView(this)
+                        setMediaController(controller)
+                        setOnPreparedListener { player ->
+                            player.isLooping = false
+                            start()
+                        }
+                        setOnErrorListener { _, what, extra ->
+                            errorMessage = "Playback failed: MediaPlayer($what,$extra)"
+                            true
+                        }
+                        setVideoURI(Uri.fromFile(File(playableItem.path)))
+                        tag = playableItem.path
+                    }.also { videoViewRef = it }
+                },
+                update = { view ->
+                    if (view.tag != playableItem.path) {
+                        view.setVideoURI(Uri.fromFile(File(playableItem.path)))
+                        view.tag = playableItem.path
+                    }
+                    videoViewRef = view
+                    if (!view.isPlaying && !isRepairing) {
+                        view.start()
+                    }
                 }
-            }
-        )
+            )
+        } else if (exoPlayer != null) {
+            AndroidView(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(16f / 9f),
+                factory = {
+                    PlayerView(it).apply {
+                        player = exoPlayer
+                        useController = true
+                    }
+                }
+            )
+        }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = onBack) {
                 Text("Back")

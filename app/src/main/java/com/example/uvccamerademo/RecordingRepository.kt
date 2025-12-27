@@ -1,12 +1,18 @@
 package com.example.uvccamerademo
 
 import android.content.Context
+import android.media.MediaCodec
+import android.media.MediaExtractor
+import android.media.MediaFormat
+import android.media.MediaMuxer
 import android.media.MediaMetadataRetriever
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.nio.ByteBuffer
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
 data class RecordingItem(
@@ -23,7 +29,7 @@ class RecordingRepository(context: Context) {
     fun createRecordingFile(): File? {
         val dir = getRecordingDir() ?: return null
         val formatter = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US)
-        val name = "uvc_${formatter.format(Date())}.mp4"
+        val name = "uvc_${formatter.format(Date())}"
         return File(dir, name)
     }
 
@@ -35,15 +41,30 @@ class RecordingRepository(context: Context) {
 
         files
             .map { file ->
-                RecordingItem(
-                    path = file.absolutePath,
-                    name = file.name,
-                    createdAt = file.lastModified(),
-                    sizeBytes = file.length(),
-                    durationMs = readDurationMs(file)
-                )
+                buildItem(normalizeExtension(file))
             }
             .sortedByDescending { it.createdAt }
+    }
+
+    suspend fun prepareForPlayback(item: RecordingItem): RecordingItem = withContext(Dispatchers.IO) {
+        val normalized = normalizeExtension(File(item.path))
+        if (shouldWaitForFinalize(normalized)) {
+            waitForStableFile(normalized)
+        }
+        buildItem(preparePlaybackFile(normalized))
+    }
+
+    suspend fun forceVideoOnlyRepair(item: RecordingItem): RecordingItem? = withContext(Dispatchers.IO) {
+        val normalized = normalizeExtension(File(item.path))
+        val playbackCopy = playbackCopyFor(normalized) ?: return@withContext null
+        if (playbackCopy.exists() && playbackCopy.lastModified() >= normalized.lastModified()) {
+            return@withContext buildItem(playbackCopy)
+        }
+        if (remuxVideoOnly(normalized, playbackCopy)) {
+            return@withContext buildItem(playbackCopy)
+        }
+        playbackCopy.delete()
+        null
     }
 
     fun deleteRecording(item: RecordingItem): Boolean {
@@ -57,6 +78,170 @@ class RecordingRepository(context: Context) {
             return null
         }
         return dir
+    }
+
+    private fun buildItem(file: File): RecordingItem {
+        return RecordingItem(
+            path = file.absolutePath,
+            name = file.name,
+            createdAt = file.lastModified(),
+            sizeBytes = file.length(),
+            durationMs = readDurationMs(file)
+        )
+    }
+
+    private fun preparePlaybackFile(file: File): File {
+        val playbackCopy = playbackCopyFor(file) ?: return file
+        if (playbackCopy.exists() && playbackCopy.lastModified() >= file.lastModified()) {
+            return playbackCopy
+        }
+        if (needsVideoOnlyRemux(file) && remuxVideoOnly(file, playbackCopy)) {
+            return playbackCopy
+        }
+        playbackCopy.delete()
+        return file
+    }
+
+    private fun normalizeExtension(file: File): File {
+        if (!file.name.endsWith(".mp4.mp4")) {
+            return file
+        }
+        val normalizedName = file.name.removeSuffix(".mp4.mp4") + ".mp4"
+        val normalizedFile = File(file.parentFile, normalizedName)
+        if (normalizedFile.exists()) {
+            return file
+        }
+        return if (file.renameTo(normalizedFile)) normalizedFile else file
+    }
+
+    private fun playbackCopyFor(file: File): File? {
+        val dir = File(appContext.cacheDir, "playback")
+        if (!dir.exists() && !dir.mkdirs()) {
+            return null
+        }
+        return File(dir, file.nameWithoutExtension + "_playback.mp4")
+    }
+
+    private fun shouldWaitForFinalize(file: File): Boolean {
+        val ageMs = System.currentTimeMillis() - file.lastModified()
+        return ageMs in 0..1500
+    }
+
+    private suspend fun waitForStableFile(file: File) {
+        var lastSize = file.length()
+        var waitedMs = 0L
+        while (waitedMs < 2000L) {
+            delay(200L)
+            val newSize = file.length()
+            if (newSize == lastSize) {
+                return
+            }
+            lastSize = newSize
+            waitedMs += 200L
+        }
+    }
+
+    private fun needsVideoOnlyRemux(file: File): Boolean {
+        val extractor = MediaExtractor()
+        return try {
+            extractor.setDataSource(file.absolutePath)
+            var hasVideo = false
+            var hasAudio = false
+            var audioInvalid = false
+            for (index in 0 until extractor.trackCount) {
+                val format = extractor.getTrackFormat(index)
+                val mime = format.getString(MediaFormat.KEY_MIME) ?: continue
+                if (mime.startsWith("video/")) {
+                    hasVideo = true
+                    val csd = format.getByteBuffer("csd-0")
+                    if (csd == null || csd.remaining() == 0) {
+                        return false
+                    }
+                } else if (mime.startsWith("audio/")) {
+                    hasAudio = true
+                    val sampleRate = if (format.containsKey(MediaFormat.KEY_SAMPLE_RATE)) {
+                        format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+                    } else {
+                        0
+                    }
+                    val channels = if (format.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) {
+                        format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+                    } else {
+                        0
+                    }
+                    val csd = format.getByteBuffer("csd-0")
+                    if (sampleRate <= 0 || channels <= 0) {
+                        audioInvalid = true
+                    } else if (csd == null || csd.remaining() == 0) {
+                        audioInvalid = true
+                    }
+                }
+            }
+            hasVideo && hasAudio && audioInvalid
+        } catch (e: RuntimeException) {
+            false
+        } finally {
+            extractor.release()
+        }
+    }
+
+    private fun remuxVideoOnly(source: File, target: File): Boolean {
+        val extractor = MediaExtractor()
+        var muxer: MediaMuxer? = null
+        try {
+            extractor.setDataSource(source.absolutePath)
+            var videoTrackIndex = -1
+            var videoFormat: MediaFormat? = null
+            for (index in 0 until extractor.trackCount) {
+                val format = extractor.getTrackFormat(index)
+                val mime = format.getString(MediaFormat.KEY_MIME) ?: continue
+                if (mime.startsWith("video/")) {
+                    videoTrackIndex = index
+                    videoFormat = format
+                    break
+                }
+            }
+            if (videoTrackIndex == -1 || videoFormat == null) {
+                return false
+            }
+            extractor.selectTrack(videoTrackIndex)
+            muxer = MediaMuxer(target.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+            val muxerTrackIndex = muxer.addTrack(videoFormat)
+            muxer.start()
+
+            val bufferSize = if (videoFormat.containsKey(MediaFormat.KEY_MAX_INPUT_SIZE)) {
+                videoFormat.getInteger(MediaFormat.KEY_MAX_INPUT_SIZE)
+            } else {
+                1024 * 256
+            }
+            val buffer = ByteBuffer.allocate(bufferSize)
+            val bufferInfo = MediaCodec.BufferInfo()
+            while (true) {
+                bufferInfo.offset = 0
+                bufferInfo.size = extractor.readSampleData(buffer, 0)
+                if (bufferInfo.size < 0) {
+                    bufferInfo.size = 0
+                    break
+                }
+                bufferInfo.presentationTimeUs = extractor.sampleTime
+                bufferInfo.flags = extractor.sampleFlags
+                muxer.writeSampleData(muxerTrackIndex, buffer, bufferInfo)
+                extractor.advance()
+            }
+            return true
+        } catch (e: RuntimeException) {
+            return false
+        } finally {
+            try {
+                muxer?.stop()
+            } catch (_: RuntimeException) {
+            }
+            try {
+                muxer?.release()
+            } catch (_: RuntimeException) {
+            }
+            extractor.release()
+        }
     }
 
     private fun readDurationMs(file: File): Long {
