@@ -29,7 +29,7 @@ class RecordingRepository(context: Context) {
     fun createRecordingFile(): File? {
         val dir = getRecordingDir() ?: return null
         val formatter = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US)
-        val name = "uvc_${formatter.format(Date())}"
+        val name = "uvc_${formatter.format(Date())}.mp4"
         return File(dir, name)
     }
 

@@ -1,6 +1,7 @@
 package com.example.uvccamerademo
 
 import android.Manifest
+import android.app.Activity
 import android.content.pm.PackageManager
 import android.hardware.usb.UsbDevice
 import android.net.Uri
@@ -15,7 +16,9 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -27,6 +30,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -46,15 +50,20 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.media3.common.MediaItem
@@ -66,6 +75,7 @@ import com.example.uvccamerademo.ui.theme.UVCCameraDemoTheme
 import com.jiangdg.ausbc.CameraClient
 import com.jiangdg.ausbc.callback.ICaptureCallBack
 import com.jiangdg.ausbc.callback.IDeviceConnectCallBack
+import com.jiangdg.ausbc.callback.IPreviewDataCallBack
 import com.jiangdg.ausbc.camera.CameraUvcStrategy
 import com.jiangdg.ausbc.camera.bean.CameraRequest
 import com.jiangdg.ausbc.widget.AspectRatioTextureView
@@ -164,6 +174,7 @@ private fun UvcPreviewScreen(
     var recordingElapsedMs by remember { mutableStateOf(0L) }
     var pendingOpen by remember { mutableStateOf(false) }
     var pendingRecord by remember { mutableStateOf(false) }
+    var recorder by remember { mutableStateOf<HevcRecorder?>(null) }
 
     val resolutionOptions = remember {
         listOf(
@@ -173,6 +184,22 @@ private fun UvcPreviewScreen(
         )
     }
     var selectedResolution by remember { mutableStateOf(resolutionOptions.first()) }
+    val previewRotation = 0f
+    val previewAspectRatio =
+        selectedResolution.width.toFloat() / selectedResolution.height.toFloat()
+
+    val previewDataCallBack = remember {
+        object : IPreviewDataCallBack {
+            override fun onPreviewData(
+                data: ByteArray?,
+                format: IPreviewDataCallBack.DataFormat
+            ) {
+                if (data != null && format == IPreviewDataCallBack.DataFormat.NV21) {
+                    recorder?.onPreviewFrame(data)
+                }
+            }
+        }
+    }
 
     val refreshDevices = {
         deviceList.clear()
@@ -215,9 +242,7 @@ private fun UvcPreviewScreen(
 
     val stopRecording = {
         if (isRecording) {
-            cameraClient.captureVideoStop()
-            isRecording = false
-            recordingStartAt = null
+            recorder?.stop()
             isFinalizing = true
             statusMessage = "Stopping recording..."
         }
@@ -234,42 +259,53 @@ private fun UvcPreviewScreen(
             return@startRecording
         }
         isFinalizing = false
-        recordingStartAt = System.currentTimeMillis()
-        recordingElapsedMs = 0L
-        isRecording = true
-        statusMessage = "Recording..."
-        cameraClient.captureVideoStart(
-            object : ICaptureCallBack {
-                override fun onBegin() {
-                    mainHandler.post {
-                        recordingStartAt = System.currentTimeMillis()
-                        recordingElapsedMs = 0L
-                        isRecording = true
-                        statusMessage = "Recording..."
+        var createdRecorder: HevcRecorder? = null
+        val callback = object : ICaptureCallBack {
+            override fun onBegin() {
+                mainHandler.post {
+                    recordingStartAt = System.currentTimeMillis()
+                    recordingElapsedMs = 0L
+                    isRecording = true
+                    statusMessage = if (createdRecorder?.isAudioEnabled == true) {
+                        "Recording..."
+                    } else {
+                        "Recording (audio disabled)..."
                     }
                 }
+            }
 
-                override fun onError(error: String?) {
-                    mainHandler.post {
-                        isRecording = false
-                        recordingStartAt = null
-                        isFinalizing = false
-                        statusMessage = "Recording failed: ${error ?: "Unknown error"}"
-                    }
+            override fun onError(error: String?) {
+                mainHandler.post {
+                    isRecording = false
+                    recordingStartAt = null
+                    isFinalizing = false
+                    recorder = null
+                    statusMessage = "Recording failed: ${error ?: "Unknown error"}"
                 }
+            }
 
-                override fun onComplete(path: String?) {
-                    mainHandler.post {
-                        isRecording = false
-                        recordingStartAt = null
-                        isFinalizing = false
-                        statusMessage = "Saved: ${path ?: "Unknown path"}"
-                    }
+            override fun onComplete(path: String?) {
+                mainHandler.post {
+                    isRecording = false
+                    recordingStartAt = null
+                    isFinalizing = false
+                    recorder = null
+                    statusMessage = "Saved: ${path ?: "Unknown path"}"
                 }
-            },
-            file.absolutePath,
-            0L
+            }
+        }
+        createdRecorder = HevcRecorder(
+            context = context,
+            width = selectedResolution.width,
+            height = selectedResolution.height,
+            outputFile = file,
+            callback = callback
         )
+        if (!createdRecorder.start()) {
+            statusMessage = "Recording failed to start"
+            return@startRecording
+        }
+        recorder = createdRecorder
     }
 
     val cameraPermissionLauncher = rememberLauncherForActivityResult(
@@ -378,6 +414,7 @@ private fun UvcPreviewScreen(
     }
 
     LaunchedEffect(Unit) {
+        cameraClient.addPreviewDataCallBack(previewDataCallBack)
         refreshDevices()
     }
 
@@ -401,6 +438,7 @@ private fun UvcPreviewScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
+            .verticalScroll(rememberScrollState())
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
@@ -408,8 +446,11 @@ private fun UvcPreviewScreen(
         AndroidView(
             modifier = Modifier
                 .fillMaxWidth()
-                .aspectRatio(selectedResolution.width.toFloat() / selectedResolution.height.toFloat()),
-            factory = { cameraView }
+                .aspectRatio(previewAspectRatio),
+            factory = { cameraView },
+            update = { view ->
+                view.rotation = previewRotation
+            }
         )
         Text(text = "Status: $statusMessage")
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -652,6 +693,8 @@ private fun PlaybackScreen(
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
+    val view = LocalView.current
+    val window = (context as? Activity)?.window
     val scope = rememberCoroutineScope()
     var deleteConfirm by remember { mutableStateOf(false) }
     var playableItem by remember { mutableStateOf(item) }
@@ -661,6 +704,7 @@ private fun PlaybackScreen(
     var attemptedRepair by remember { mutableStateOf(false) }
     var usePlatformPlayer by remember { mutableStateOf(false) }
     var videoViewRef by remember { mutableStateOf<VideoView?>(null) }
+    var isFullscreen by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(item.path) {
         isRepairing = true
@@ -729,52 +773,26 @@ private fun PlaybackScreen(
         }
     }
 
-    if (deleteConfirm) {
-        AlertDialog(
-            onDismissRequest = { deleteConfirm = false },
-            title = { Text("Delete recording?") },
-            text = { Text(item.name) },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        exoPlayer?.stop()
-                        videoViewRef?.stopPlayback()
-                        repository.deleteRecording(item)
-                        deleteConfirm = false
-                        onBack()
-                    }
-                ) {
-                    Text("Delete")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { deleteConfirm = false }) {
-                    Text("Cancel")
-                }
+    DisposableEffect(isFullscreen, window) {
+        if (window != null) {
+            WindowCompat.setDecorFitsSystemWindows(window, !isFullscreen)
+            val controller = WindowInsetsControllerCompat(window, view)
+            if (isFullscreen) {
+                controller.hide(WindowInsetsCompat.Type.systemBars())
+                controller.systemBarsBehavior =
+                    WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            } else {
+                controller.show(WindowInsetsCompat.Type.systemBars())
             }
-        )
+        }
+        onDispose { }
     }
 
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        Text(text = "Playback", style = MaterialTheme.typography.titleLarge)
-        Text(text = playableItem.name, style = MaterialTheme.typography.bodySmall)
-        if (errorMessage != null) {
-            Text(text = errorMessage!!, color = MaterialTheme.colorScheme.error)
-        }
-        if (isRepairing) {
-            Text(text = "Preparing video...", style = MaterialTheme.typography.bodySmall)
-        }
+    @Composable
+    fun PlayerSurface(surfaceModifier: Modifier) {
         if (usePlatformPlayer) {
-            Text(text = "Using system player", style = MaterialTheme.typography.bodySmall)
             AndroidView(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(16f / 9f),
+                modifier = surfaceModifier,
                 factory = { viewContext ->
                     VideoView(viewContext).apply {
                         val controller = MediaController(viewContext)
@@ -805,9 +823,7 @@ private fun PlaybackScreen(
             )
         } else if (exoPlayer != null) {
             AndroidView(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(16f / 9f),
+                modifier = surfaceModifier,
                 factory = {
                     PlayerView(it).apply {
                         player = exoPlayer
@@ -816,12 +832,93 @@ private fun PlaybackScreen(
                 }
             )
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = onBack) {
-                Text("Back")
+    }
+
+    if (deleteConfirm) {
+        AlertDialog(
+            onDismissRequest = { deleteConfirm = false },
+            title = { Text("Delete recording?") },
+            text = { Text(item.name) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        exoPlayer?.stop()
+                        videoViewRef?.stopPlayback()
+                        repository.deleteRecording(item)
+                        deleteConfirm = false
+                        onBack()
+                    }
+                ) {
+                    Text("Delete")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleteConfirm = false }) {
+                    Text("Cancel")
+                }
             }
-            OutlinedButton(onClick = { deleteConfirm = true }) {
-                Text("Delete")
+        )
+    }
+
+    if (isFullscreen) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            PlayerSurface(surfaceModifier = Modifier.fillMaxSize())
+            Column(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                if (errorMessage != null) {
+                    Text(text = errorMessage!!, color = MaterialTheme.colorScheme.error)
+                }
+                if (isRepairing) {
+                    Text(text = "Preparing video...", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+            OutlinedButton(
+                onClick = { isFullscreen = false },
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(16.dp)
+            ) {
+                Text("Exit")
+            }
+        }
+    } else {
+        Column(
+            modifier = modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(text = "Playback", style = MaterialTheme.typography.titleLarge)
+            Text(text = playableItem.name, style = MaterialTheme.typography.bodySmall)
+            if (errorMessage != null) {
+                Text(text = errorMessage!!, color = MaterialTheme.colorScheme.error)
+            }
+            if (isRepairing) {
+                Text(text = "Preparing video...", style = MaterialTheme.typography.bodySmall)
+            }
+            if (usePlatformPlayer) {
+                Text(text = "Using system player", style = MaterialTheme.typography.bodySmall)
+            }
+            PlayerSurface(
+                surfaceModifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(16f / 9f)
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = onBack) {
+                    Text("Back")
+                }
+                OutlinedButton(onClick = { deleteConfirm = true }) {
+                    Text("Delete")
+                }
+                OutlinedButton(onClick = { isFullscreen = true }) {
+                    Text("Fullscreen")
+                }
             }
         }
     }
