@@ -15,6 +15,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
@@ -55,9 +56,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.platform.LocalView
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
@@ -105,9 +108,16 @@ private sealed interface Screen {
     data class Playback(val item: RecordingItem) : Screen
 }
 
-private data class ResolutionOption(val width: Int, val height: Int) {
+internal data class ResolutionOption(val width: Int, val height: Int) {
     val label: String = "${width}x${height}"
 }
+
+internal data class UvcDeviceInfo(
+    val id: String,
+    val name: String,
+    val vendorId: Int,
+    val productId: Int
+)
 
 @Composable
 private fun MainContent() {
@@ -145,28 +155,47 @@ private fun UvcPreviewScreen(
     onOpenRecordings: () -> Unit
 ) {
     val context = LocalContext.current
+    val isPreview = LocalInspectionMode.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
 
-    val cameraView = remember { AspectRatioTextureView(context) }
+    val cameraView = remember {
+        if (isPreview) {
+            null
+        } else {
+            AspectRatioTextureView(context)
+        }
+    }
     val cameraRequest = remember {
         CameraRequest.Builder()
             .setPreviewWidth(640)
             .setPreviewHeight(480)
             .create()
     }
-    val cameraStrategy = remember { CameraUvcStrategy(context) }
+    val cameraStrategy = remember {
+        if (isPreview) {
+            null
+        } else {
+            CameraUvcStrategy(context)
+        }
+    }
     val cameraClient = remember {
-        CameraClient.newBuilder(context)
-            .setCameraStrategy(cameraStrategy)
-            .setCameraRequest(cameraRequest)
-            .setEnableGLES(false)
-            .build()
+        if (isPreview || cameraStrategy == null) {
+            null
+        } else {
+            CameraClient.newBuilder(context)
+                .setCameraStrategy(cameraStrategy)
+                .setCameraRequest(cameraRequest)
+                .setEnableGLES(false)
+                .build()
+        }
     }
 
-    val deviceList = remember { mutableStateListOf<UsbDevice>() }
+    val deviceList = remember { mutableStateListOf<UvcDeviceInfo>() }
     var selectedDeviceId by remember { mutableStateOf<String?>(null) }
-    var statusMessage by remember { mutableStateOf("Idle") }
+    var statusMessage by remember {
+        mutableStateOf(if (isPreview) "Preview mode" else "Idle")
+    }
     var isCameraOpened by remember { mutableStateOf(false) }
     var isRecording by remember { mutableStateOf(false) }
     var isFinalizing by remember { mutableStateOf(false) }
@@ -201,21 +230,33 @@ private fun UvcPreviewScreen(
         }
     }
 
-    val refreshDevices = {
+    fun refreshDevices() {
         deviceList.clear()
+        if (isPreview || cameraStrategy == null) {
+            selectedDeviceId = null
+            return
+        }
         val devices = cameraStrategy.getUsbDeviceList()
         if (devices.isNullOrEmpty()) {
             selectedDeviceId = null
         } else {
-            deviceList.addAll(devices)
-            if (selectedDeviceId == null || devices.none { it.deviceId.toString() == selectedDeviceId }) {
-                selectedDeviceId = devices.first().deviceId.toString()
+            val mapped = devices.map { device ->
+                UvcDeviceInfo(
+                    id = device.deviceId.toString(),
+                    name = device.productName ?: device.deviceName,
+                    vendorId = device.vendorId,
+                    productId = device.productId
+                )
+            }
+            deviceList.addAll(mapped)
+            if (selectedDeviceId == null || mapped.none { it.id == selectedDeviceId }) {
+                selectedDeviceId = mapped.first().id
             }
         }
     }
 
     val applyResolution = { option: ResolutionOption ->
-        val updated = if (isCameraOpened) {
+        val updated = if (isCameraOpened && cameraClient != null) {
             cameraClient.updateResolution(option.width, option.height)
         } else {
             true
@@ -230,17 +271,23 @@ private fun UvcPreviewScreen(
         }
     }
 
-    val openCamera = {
+    fun openCamera() {
+        if (isPreview) {
+            statusMessage = "Preview mode (camera disabled)"
+            return
+        }
         if (selectedDeviceId == null) {
             statusMessage = "No UVC device selected"
         } else {
-            cameraClient.openCamera(cameraView, false)
-            cameraClient.switchCamera(selectedDeviceId!!)
+            val view = cameraView ?: return
+            val client = cameraClient ?: return
+            client.openCamera(view, false)
+            client.switchCamera(selectedDeviceId!!)
             statusMessage = "Open requested"
         }
     }
 
-    val stopRecording = {
+    fun stopRecording() {
         if (isRecording) {
             recorder?.stop()
             isFinalizing = true
@@ -249,6 +296,10 @@ private fun UvcPreviewScreen(
     }
 
     val startRecording = startRecording@{
+        if (isPreview) {
+            statusMessage = "Preview mode (record disabled)"
+            return@startRecording
+        }
         if (!isCameraOpened) {
             statusMessage = "Open the camera first"
             return@startRecording
@@ -308,119 +359,129 @@ private fun UvcPreviewScreen(
         recorder = createdRecorder
     }
 
-    val cameraPermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        if (granted && pendingOpen) {
-            pendingOpen = false
-            openCamera()
-        } else if (!granted) {
-            pendingOpen = false
-            statusMessage = "Camera permission required"
-        }
-    }
-
-    val recordPermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        if (granted && pendingRecord) {
-            pendingRecord = false
-            startRecording()
-        } else if (!granted) {
-            pendingRecord = false
-            statusMessage = "Audio permission required"
-        }
-    }
-
-    DisposableEffect(lifecycleOwner, cameraClient, cameraStrategy) {
-        val observer = LifecycleEventObserver { _, event ->
-            when (event) {
-                Lifecycle.Event.ON_START -> cameraStrategy.register()
-                Lifecycle.Event.ON_STOP -> {
-                    stopRecording()
-                    cameraClient.closeCamera()
-                    isCameraOpened = false
-                }
-                Lifecycle.Event.ON_DESTROY -> cameraStrategy.unRegister()
-                else -> Unit
+    val cameraPermissionLauncher = if (isPreview) {
+        null
+    } else {
+        rememberLauncherForActivityResult(
+            ActivityResultContracts.RequestPermission()
+        ) { granted ->
+            if (granted && pendingOpen) {
+                pendingOpen = false
+                openCamera()
+            } else if (!granted) {
+                pendingOpen = false
+                statusMessage = "Camera permission required"
             }
         }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose {
-            lifecycleOwner.lifecycle.removeObserver(observer)
-            stopRecording()
-            cameraClient.closeCamera()
-            cameraStrategy.unRegister()
+    }
+
+    val recordPermissionLauncher = if (isPreview) {
+        null
+    } else {
+        rememberLauncherForActivityResult(
+            ActivityResultContracts.RequestPermission()
+        ) { granted ->
+            if (granted && pendingRecord) {
+                pendingRecord = false
+                startRecording()
+            } else if (!granted) {
+                pendingRecord = false
+                statusMessage = "Audio permission required"
+            }
         }
     }
 
-    DisposableEffect(cameraStrategy) {
-        val callback = object : IDeviceConnectCallBack {
-            override fun onAttachDev(device: UsbDevice?) {
-                if (device == null) return
-                mainHandler.post {
-                    statusMessage = "Device attached: ${device.deviceName}"
-                    refreshDevices()
-                }
-            }
-
-            override fun onDetachDec(device: UsbDevice?) {
-                if (device == null) return
-                mainHandler.post {
-                    statusMessage = "Device detached: ${device.deviceName}"
-                    if (selectedDeviceId == device.deviceId.toString()) {
-                        selectedDeviceId = null
+    if (!isPreview && cameraClient != null && cameraStrategy != null) {
+        DisposableEffect(lifecycleOwner, cameraClient, cameraStrategy) {
+            val observer = LifecycleEventObserver { _, event ->
+                when (event) {
+                    Lifecycle.Event.ON_START -> cameraStrategy.register()
+                    Lifecycle.Event.ON_STOP -> {
+                        stopRecording()
+                        cameraClient.closeCamera()
+                        isCameraOpened = false
                     }
-                    stopRecording()
-                    cameraClient.closeCamera()
-                    isCameraOpened = false
-                    refreshDevices()
+                    Lifecycle.Event.ON_DESTROY -> cameraStrategy.unRegister()
+                    else -> Unit
                 }
             }
-
-            override fun onConnectDev(
-                device: UsbDevice?,
-                ctrlBlock: USBMonitor.UsbControlBlock?
-            ) {
-                if (device == null) return
-                mainHandler.post {
-                    statusMessage = "In use: ${device.deviceName}"
-                    isCameraOpened = cameraClient.isCameraOpened() == true
-                }
-            }
-
-            override fun onDisConnectDec(
-                device: UsbDevice?,
-                ctrlBlock: USBMonitor.UsbControlBlock?
-            ) {
-                if (device == null) return
-                mainHandler.post {
-                    statusMessage = "Disconnected: ${device.deviceName}"
-                    stopRecording()
-                    isCameraOpened = false
-                }
-            }
-
-            override fun onCancelDev(device: UsbDevice?) {
-                if (device == null) return
-                mainHandler.post {
-                    statusMessage = "USB permission canceled"
-                    isCameraOpened = false
-                }
+            lifecycleOwner.lifecycle.addObserver(observer)
+            onDispose {
+                lifecycleOwner.lifecycle.removeObserver(observer)
+                stopRecording()
+                cameraClient.closeCamera()
+                cameraStrategy.unRegister()
             }
         }
-        cameraStrategy.setDeviceConnectStatusListener(callback)
-        onDispose { }
-    }
 
-    LaunchedEffect(Unit) {
-        cameraClient.addPreviewDataCallBack(previewDataCallBack)
-        refreshDevices()
-    }
+        DisposableEffect(cameraStrategy) {
+            val callback = object : IDeviceConnectCallBack {
+                override fun onAttachDev(device: UsbDevice?) {
+                    if (device == null) return
+                    mainHandler.post {
+                        statusMessage = "Device attached: ${device.deviceName}"
+                        refreshDevices()
+                    }
+                }
 
-    LaunchedEffect(selectedDeviceId, isCameraOpened) {
-        if (isCameraOpened && selectedDeviceId != null) {
-            cameraClient.switchCamera(selectedDeviceId!!)
+                override fun onDetachDec(device: UsbDevice?) {
+                    if (device == null) return
+                    mainHandler.post {
+                        statusMessage = "Device detached: ${device.deviceName}"
+                        if (selectedDeviceId == device.deviceId.toString()) {
+                            selectedDeviceId = null
+                        }
+                        stopRecording()
+                        cameraClient.closeCamera()
+                        isCameraOpened = false
+                        refreshDevices()
+                    }
+                }
+
+                override fun onConnectDev(
+                    device: UsbDevice?,
+                    ctrlBlock: USBMonitor.UsbControlBlock?
+                ) {
+                    if (device == null) return
+                    mainHandler.post {
+                        statusMessage = "In use: ${device.deviceName}"
+                        isCameraOpened = cameraClient.isCameraOpened() == true
+                    }
+                }
+
+                override fun onDisConnectDec(
+                    device: UsbDevice?,
+                    ctrlBlock: USBMonitor.UsbControlBlock?
+                ) {
+                    if (device == null) return
+                    mainHandler.post {
+                        statusMessage = "Disconnected: ${device.deviceName}"
+                        stopRecording()
+                        isCameraOpened = false
+                    }
+                }
+
+                override fun onCancelDev(device: UsbDevice?) {
+                    if (device == null) return
+                    mainHandler.post {
+                        statusMessage = "USB permission canceled"
+                        isCameraOpened = false
+                    }
+                }
+            }
+            cameraStrategy.setDeviceConnectStatusListener(callback)
+            onDispose { }
+        }
+
+        LaunchedEffect(Unit) {
+            cameraClient.addPreviewDataCallBack(previewDataCallBack)
+            refreshDevices()
+        }
+
+        LaunchedEffect(selectedDeviceId, isCameraOpened) {
+            if (isCameraOpened && selectedDeviceId != null) {
+                cameraClient.switchCamera(selectedDeviceId!!)
+            }
         }
     }
 
@@ -435,6 +496,116 @@ private fun UvcPreviewScreen(
         }
     }
 
+    fun handleOpen() {
+        if (isPreview) {
+            statusMessage = "Preview mode (camera disabled)"
+            return
+        }
+        val hasCameraPermission = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.CAMERA
+        ) == PackageManager.PERMISSION_GRANTED
+        if (hasCameraPermission) {
+            openCamera()
+        } else {
+            pendingOpen = true
+            cameraPermissionLauncher?.launch(Manifest.permission.CAMERA)
+        }
+    }
+
+    fun handleClose() {
+        stopRecording()
+        cameraClient?.closeCamera()
+        isCameraOpened = false
+        statusMessage = "Closed"
+    }
+
+    fun handleToggleRecord() {
+        if (isPreview) {
+            statusMessage = "Preview mode (record disabled)"
+            return
+        }
+        if (isRecording) {
+            stopRecording()
+            return
+        }
+        val hasRecordPermission = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.RECORD_AUDIO
+        ) == PackageManager.PERMISSION_GRANTED
+        if (hasRecordPermission) {
+            startRecording()
+        } else {
+            pendingRecord = true
+            recordPermissionLauncher?.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    }
+
+    val previewContent: @Composable (Modifier) -> Unit = { contentModifier ->
+        if (isPreview || cameraView == null) {
+            Box(
+                modifier = contentModifier.background(MaterialTheme.colorScheme.surfaceVariant),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(text = "Camera preview")
+            }
+        } else {
+            val previewView = requireNotNull(cameraView)
+            AndroidView(
+                modifier = contentModifier,
+                factory = { previewView },
+                update = { view ->
+                    view.rotation = previewRotation
+                }
+            )
+        }
+    }
+
+    UvcPreviewScreenContent(
+        modifier = modifier,
+        previewAspectRatio = previewAspectRatio,
+        statusMessage = statusMessage,
+        isCameraOpened = isCameraOpened,
+        isRecording = isRecording,
+        isFinalizing = isFinalizing,
+        recordingElapsedMs = recordingElapsedMs,
+        selectedDeviceId = selectedDeviceId,
+        resolutionOptions = resolutionOptions,
+        selectedResolution = selectedResolution,
+        deviceList = deviceList,
+        onOpen = { handleOpen() },
+        onClose = { handleClose() },
+        onToggleRecord = { handleToggleRecord() },
+        onApplyResolution = { option -> applyResolution(option) },
+        onRefreshDevices = { refreshDevices() },
+        onOpenRecordings = onOpenRecordings,
+        onSelectDevice = { selectedDeviceId = it },
+        previewContent = previewContent
+    )
+}
+
+@Composable
+internal fun UvcPreviewScreenContent(
+    modifier: Modifier = Modifier,
+    previewAspectRatio: Float,
+    statusMessage: String,
+    isCameraOpened: Boolean,
+    isRecording: Boolean,
+    isFinalizing: Boolean,
+    recordingElapsedMs: Long,
+    selectedDeviceId: String?,
+    resolutionOptions: List<ResolutionOption>,
+    selectedResolution: ResolutionOption,
+    deviceList: List<UvcDeviceInfo>,
+    onOpen: () -> Unit,
+    onClose: () -> Unit,
+    onToggleRecord: () -> Unit,
+    onApplyResolution: (ResolutionOption) -> Unit,
+    onRefreshDevices: () -> Unit,
+    onOpenRecordings: () -> Unit,
+    onSelectDevice: (String) -> Unit,
+    previewContent: @Composable (Modifier) -> Unit
+) {
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -443,14 +614,10 @@ private fun UvcPreviewScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Text(text = "UVC Camera Preview", style = MaterialTheme.typography.titleLarge)
-        AndroidView(
-            modifier = Modifier
+        previewContent(
+            Modifier
                 .fillMaxWidth()
-                .aspectRatio(previewAspectRatio),
-            factory = { cameraView },
-            update = { view ->
-                view.rotation = previewRotation
-            }
+                .aspectRatio(previewAspectRatio)
         )
         Text(text = "Status: $statusMessage")
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -466,51 +633,17 @@ private fun UvcPreviewScreen(
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(
-                onClick = {
-                    val hasCameraPermission = ContextCompat.checkSelfPermission(
-                        context,
-                        Manifest.permission.CAMERA
-                    ) == PackageManager.PERMISSION_GRANTED
-                    if (hasCameraPermission) {
-                        openCamera()
-                    } else {
-                        pendingOpen = true
-                        cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
-                    }
-                },
-                enabled = !isCameraOpened
-            ) {
+            Button(onClick = onOpen, enabled = !isCameraOpened) {
                 Text("Open")
             }
             OutlinedButton(
-                onClick = {
-                    stopRecording()
-                    cameraClient.closeCamera()
-                    isCameraOpened = false
-                    statusMessage = "Closed"
-                },
+                onClick = onClose,
                 enabled = isCameraOpened && !isFinalizing
             ) {
                 Text("Close")
             }
             OutlinedButton(
-                onClick = {
-                    if (isRecording) {
-                        stopRecording()
-                        return@OutlinedButton
-                    }
-                    val hasRecordPermission = ContextCompat.checkSelfPermission(
-                        context,
-                        Manifest.permission.RECORD_AUDIO
-                    ) == PackageManager.PERMISSION_GRANTED
-                    if (hasRecordPermission) {
-                        startRecording()
-                    } else {
-                        pendingRecord = true
-                        recordPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                    }
-                },
+                onClick = onToggleRecord,
                 enabled = isCameraOpened && !isFinalizing
             ) {
                 Text(if (isRecording) "Stop" else "Record")
@@ -519,20 +652,25 @@ private fun UvcPreviewScreen(
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             resolutionOptions.forEach { option ->
                 val selected = option == selectedResolution
-                val action = { applyResolution(option) }
                 if (selected) {
-                    Button(onClick = action, enabled = !isRecording && !isFinalizing) {
+                    Button(
+                        onClick = { onApplyResolution(option) },
+                        enabled = !isRecording && !isFinalizing
+                    ) {
                         Text(option.label)
                     }
                 } else {
-                    OutlinedButton(onClick = action, enabled = !isRecording && !isFinalizing) {
+                    OutlinedButton(
+                        onClick = { onApplyResolution(option) },
+                        enabled = !isRecording && !isFinalizing
+                    ) {
                         Text(option.label)
                     }
                 }
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = { refreshDevices() }) {
+            OutlinedButton(onClick = onRefreshDevices) {
                 Text("Refresh Devices")
             }
             OutlinedButton(onClick = onOpenRecordings, enabled = !isRecording && !isFinalizing) {
@@ -549,21 +687,21 @@ private fun UvcPreviewScreen(
                 .fillMaxWidth()
                 .heightIn(max = 220.dp)
         ) {
-            items(deviceList, key = { it.deviceId }) { device ->
-                val deviceId = device.deviceId.toString()
+            items(deviceList, key = { it.id }) { device ->
+                val deviceId = device.id
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { selectedDeviceId = deviceId }
+                        .clickable { onSelectDevice(deviceId) }
                         .padding(vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     RadioButton(
                         selected = deviceId == selectedDeviceId,
-                        onClick = { selectedDeviceId = deviceId }
+                        onClick = { onSelectDevice(deviceId) }
                     )
                     Column(modifier = Modifier.weight(1f)) {
-                        Text(text = device.productName ?: device.deviceName)
+                        Text(text = device.name)
                         Text(
                             text = "id=$deviceId vid=${device.vendorId} pid=${device.productId}",
                             style = MaterialTheme.typography.bodySmall
@@ -954,4 +1092,10 @@ private fun formatDuration(durationMs: Long): String {
     } else {
         String.format(Locale.US, "%02d:%02d", minutes, seconds)
     }
+}
+
+@Preview(showBackground = true)
+@Composable
+fun MainContentPreview() {
+    UvcPreviewScreenPreview()
 }

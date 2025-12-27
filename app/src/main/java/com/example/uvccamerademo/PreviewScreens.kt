@@ -1,0 +1,65 @@
+package com.example.uvccamerademo
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.tooling.preview.Preview
+import com.example.uvccamerademo.ui.theme.UVCCameraDemoTheme
+
+@Preview(showBackground = true)
+@Composable
+fun UvcPreviewScreenPreview() {
+    val resolutionOptions = listOf(
+        ResolutionOption(640, 480),
+        ResolutionOption(1280, 720),
+        ResolutionOption(1920, 1080)
+    )
+    val selectedResolution = resolutionOptions[1]
+    val devices = listOf(
+        UvcDeviceInfo(
+            id = "1001",
+            name = "UVC Camera",
+            vendorId = 4660,
+            productId = 22136
+        ),
+        UvcDeviceInfo(
+            id = "1002",
+            name = "USB Capture",
+            vendorId = 11325,
+            productId = 8
+        )
+    )
+    UVCCameraDemoTheme {
+        UvcPreviewScreenContent(
+            previewAspectRatio = selectedResolution.width.toFloat() / selectedResolution.height,
+            statusMessage = "Preview mode",
+            isCameraOpened = true,
+            isRecording = true,
+            isFinalizing = false,
+            recordingElapsedMs = 65_000L,
+            selectedDeviceId = devices.first().id,
+            resolutionOptions = resolutionOptions,
+            selectedResolution = selectedResolution,
+            deviceList = devices,
+            onOpen = {},
+            onClose = {},
+            onToggleRecord = {},
+            onApplyResolution = {},
+            onRefreshDevices = {},
+            onOpenRecordings = {},
+            onSelectDevice = {},
+            previewContent = { contentModifier ->
+                Box(
+                    modifier = contentModifier.background(MaterialTheme.colorScheme.surfaceVariant),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(text = "Camera preview")
+                }
+            }
+        )
+    }
+}
