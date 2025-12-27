@@ -48,8 +48,6 @@ fun UvcPreviewScreenPreview() {
             resolutionOptions = resolutionOptions,
             selectedResolution = selectedResolution,
             deviceList = devices,
-            onOpen = {},
-            onClose = {},
             onToggleRecord = {},
             onApplyResolution = {},
             onRefreshDevices = {},

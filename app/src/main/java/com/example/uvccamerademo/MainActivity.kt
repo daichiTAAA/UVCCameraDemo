@@ -214,6 +214,8 @@ private fun UvcPreviewScreen(
     var recordingElapsedMs by remember { mutableStateOf(0L) }
     var pendingOpen by remember { mutableStateOf(false) }
     var pendingRecord by remember { mutableStateOf(false) }
+    var isStrategyActive by remember { mutableStateOf(false) }
+    var isOpening by remember { mutableStateOf(false) }
     var recorder by remember { mutableStateOf<HevcRecorder?>(null) }
 
     val resolutionOptions = remember {
@@ -297,6 +299,9 @@ private fun UvcPreviewScreen(
     }
 
     fun openCamera() {
+        if (isCameraOpened) {
+            return
+        }
         if (isPreview) {
             statusMessage = context.getString(R.string.status_preview_camera_disabled)
             return
@@ -306,6 +311,7 @@ private fun UvcPreviewScreen(
         } else {
             val view = cameraView ?: return
             val client = cameraClient ?: return
+            isOpening = true
             client.openCamera(view, false)
             client.switchCamera(selectedDeviceId!!)
             statusMessage = context.getString(R.string.status_camera_opening)
@@ -422,22 +428,63 @@ private fun UvcPreviewScreen(
     }
     }
 
+    fun handleOpen() {
+        if (isPreview) {
+            statusMessage = context.getString(R.string.status_preview_camera_disabled)
+            return
+        }
+        if (pendingOpen || isOpening || isCameraOpened) {
+            return
+        }
+        val hasCameraPermission = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.CAMERA
+        ) == PackageManager.PERMISSION_GRANTED
+        if (hasCameraPermission) {
+            openCamera()
+        } else {
+            pendingOpen = true
+            cameraPermissionLauncher?.launch(Manifest.permission.CAMERA)
+        }
+    }
+
+    fun handleAutoOpen() {
+        if (isPreview || !isStrategyActive) {
+            return
+        }
+        if (pendingOpen || isOpening || selectedDeviceId == null || isCameraOpened) {
+            return
+        }
+        handleOpen()
+    }
+
     if (!isPreview && cameraClient != null && cameraStrategy != null) {
         DisposableEffect(lifecycleOwner, cameraClient, cameraStrategy) {
             val observer = LifecycleEventObserver { _, event ->
                 when (event) {
-                    Lifecycle.Event.ON_START -> cameraStrategy.register()
+                    Lifecycle.Event.ON_START -> {
+                        cameraStrategy.register()
+                        isStrategyActive = true
+                    }
                     Lifecycle.Event.ON_STOP -> {
+                        isStrategyActive = false
+                        isOpening = false
                         stopRecording()
                         cameraClient.closeCamera()
                         isCameraOpened = false
                     }
-                    Lifecycle.Event.ON_DESTROY -> cameraStrategy.unRegister()
+                    Lifecycle.Event.ON_DESTROY -> {
+                        isStrategyActive = false
+                        isOpening = false
+                        cameraStrategy.unRegister()
+                    }
                     else -> Unit
                 }
             }
             lifecycleOwner.lifecycle.addObserver(observer)
             onDispose {
+                isStrategyActive = false
+                isOpening = false
                 lifecycleOwner.lifecycle.removeObserver(observer)
                 stopRecording()
                 cameraClient.closeCamera()
@@ -470,9 +517,10 @@ private fun UvcPreviewScreen(
                     }
                     stopRecording()
                     cameraClient.closeCamera()
-                        isCameraOpened = false
-                        refreshDevices()
-                    }
+                    isOpening = false
+                    isCameraOpened = false
+                    refreshDevices()
+                }
                 }
 
             override fun onConnectDev(
@@ -485,6 +533,7 @@ private fun UvcPreviewScreen(
                         R.string.status_device_in_use,
                         device.deviceName
                     )
+                    isOpening = false
                     isCameraOpened = cameraClient.isCameraOpened() == true
                 }
             }
@@ -500,6 +549,7 @@ private fun UvcPreviewScreen(
                         device.deviceName
                     )
                     stopRecording()
+                    isOpening = false
                     isCameraOpened = false
                 }
             }
@@ -508,6 +558,7 @@ private fun UvcPreviewScreen(
                 if (device == null) return
                 mainHandler.post {
                     statusMessage = context.getString(R.string.status_usb_permission_denied)
+                    isOpening = false
                     isCameraOpened = false
                 }
             }
@@ -518,7 +569,20 @@ private fun UvcPreviewScreen(
 
         LaunchedEffect(Unit) {
             cameraClient.addPreviewDataCallBack(previewDataCallBack)
-            refreshDevices()
+        }
+
+        LaunchedEffect(isStrategyActive) {
+            if (!isStrategyActive) {
+                return@LaunchedEffect
+            }
+            repeat(10) {
+                refreshDevices()
+                handleAutoOpen()
+                if (selectedDeviceId != null) {
+                    return@LaunchedEffect
+                }
+                delay(400L)
+            }
         }
 
         LaunchedEffect(selectedDeviceId, isCameraOpened) {
@@ -537,30 +601,6 @@ private fun UvcPreviewScreen(
         } else {
             recordingElapsedMs = 0L
         }
-    }
-
-    fun handleOpen() {
-        if (isPreview) {
-            statusMessage = context.getString(R.string.status_preview_camera_disabled)
-            return
-        }
-        val hasCameraPermission = ContextCompat.checkSelfPermission(
-            context,
-            Manifest.permission.CAMERA
-        ) == PackageManager.PERMISSION_GRANTED
-        if (hasCameraPermission) {
-            openCamera()
-        } else {
-            pendingOpen = true
-            cameraPermissionLauncher?.launch(Manifest.permission.CAMERA)
-        }
-    }
-
-    fun handleClose() {
-        stopRecording()
-        cameraClient?.closeCamera()
-        isCameraOpened = false
-        statusMessage = context.getString(R.string.status_closed)
     }
 
     fun handleToggleRecord() {
@@ -604,6 +644,10 @@ private fun UvcPreviewScreen(
         }
     }
 
+    LaunchedEffect(selectedDeviceId, selectedResolution) {
+        handleAutoOpen()
+    }
+
     UvcPreviewScreenContent(
         modifier = modifier,
         previewAspectRatio = previewAspectRatio,
@@ -616,13 +660,17 @@ private fun UvcPreviewScreen(
         resolutionOptions = resolutionOptions,
         selectedResolution = selectedResolution,
         deviceList = deviceList,
-        onOpen = { handleOpen() },
-        onClose = { handleClose() },
         onToggleRecord = { handleToggleRecord() },
         onApplyResolution = { option -> applyResolution(option) },
         onRefreshDevices = { refreshDevices() },
         onOpenRecordings = onOpenRecordings,
-        onSelectDevice = { selectedDeviceId = it },
+        onSelectDevice = { id ->
+            val wasSelected = selectedDeviceId == id
+            selectedDeviceId = id
+            if (wasSelected) {
+                handleAutoOpen()
+            }
+        },
         previewContent = previewContent
     )
 }
@@ -640,8 +688,6 @@ internal fun UvcPreviewScreenContent(
     resolutionOptions: List<ResolutionOption>,
     selectedResolution: ResolutionOption,
     deviceList: List<UvcDeviceInfo>,
-    onOpen: () -> Unit,
-    onClose: () -> Unit,
     onToggleRecord: () -> Unit,
     onApplyResolution: (ResolutionOption) -> Unit,
     onRefreshDevices: () -> Unit,
@@ -773,44 +819,26 @@ internal fun UvcPreviewScreenContent(
                 shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
             ) {
-                Column(
-                    modifier = Modifier.padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                Row(
+                    modifier = Modifier.padding(2.dp),
                 ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    Button(
+                        modifier = Modifier
+                            .weight(1f),
+                        onClick = onToggleRecord,
+                        enabled = isCameraOpened && !isFinalizing,
+                        colors = recordButtonColors
                     ) {
-                        Button(
-                            modifier = Modifier.weight(1f),
-                            onClick = onOpen,
-                            enabled = !isCameraOpened
-                        ) {
-                            Text(stringResource(R.string.action_open))
+                        val recordText = if (isRecording) {
+                            stringResource(R.string.action_stop)
+                        } else {
+                            stringResource(R.string.action_record)
                         }
-                        OutlinedButton(
-                            modifier = Modifier.weight(1f),
-                            onClick = onClose,
-                            enabled = isCameraOpened && !isFinalizing
-                        ) {
-                            Text(stringResource(R.string.action_close))
-                        }
-                        Button(
-                            modifier = Modifier.weight(1f),
-                            onClick = onToggleRecord,
-                            enabled = isCameraOpened && !isFinalizing,
-                            colors = recordButtonColors
-                        ) {
-                            val recordText = if (isRecording) {
-                                stringResource(R.string.action_stop)
-                            } else {
-                                stringResource(R.string.action_record)
-                            }
-                            Text(recordText)
-                        }
+                        Text(recordText)
                     }
                     FilledTonalButton(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .weight(1f),
                         onClick = onOpenRecordings
                     ) {
                         Text(stringResource(R.string.label_recordings))
