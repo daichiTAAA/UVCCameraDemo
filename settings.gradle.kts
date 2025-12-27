@@ -16,7 +16,9 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
-        // mavenリポジトリのURLを指定する際の推奨される書き方
+        maven {
+            url = uri("https://maven.aliyun.com/repository/public")
+        }
         maven {
             url = uri("https://jitpack.io")
         }

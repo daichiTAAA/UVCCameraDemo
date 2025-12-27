@@ -41,8 +41,20 @@ android {
     }
 }
 
+configurations.configureEach {
+    resolutionStrategy.dependencySubstitution {
+        substitute(module("com.github.jiangdongguo:libuvc"))
+            .using(
+                module(
+                    "com.github.jiangdongguo.AndroidUSBCamera:libuvc:${libs.versions.libausbc.get()}"
+                )
+            )
+    }
+}
+
 dependencies {
     implementation(libs.libausbc)
+    implementation("com.github.jiangdongguo.AndroidUSBCamera:libuvc:${libs.versions.libausbc.get()}")
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
