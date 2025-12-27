@@ -1,6 +1,6 @@
-# Jetpack Compose で AndroidUVCCamera（AUSBC / libausbc）を使う手順（このプロジェクト向け）
+# AndroidUVCCamera（AUSBC / libausbc）Compose 実装ガイド（このプロジェクト向け）
 
-このプロジェクト（`UVCCameraDemo`）は Jetpack Compose をUIに使い、UVC対応のUSBカメラを表示/撮影するために **AUSBC（AndroidUSBCamera / libausbc）** を利用します。
+このプロジェクト（`UVCCameraDemo`）でUVC対応USBカメラを扱う際の「使い方 + 実装メモ」を統合したドキュメントです。`MainActivity.kt` の `UvcScreen` 実装を前提にしています。
 
 > 参照: `docs/AndroidUVCCameraOriginalREADME.md`（元README / API一覧）
 
@@ -18,69 +18,68 @@
 
 ---
 
-## 1. 依存関係（このプロジェクトは導入済み）
+## 1. 依存関係とビルド注意（このプロジェクトは導入済み）
 
-このプロジェクトでは、すでに以下が設定済みです。
-
-- `settings.gradle.kts` に JitPack リポジトリ追加済み
-- `app/build.gradle.kts` に `libausbc` 依存追加済み
-
-該当箇所:
+このプロジェクトでは、次のリポジトリ/依存関係を想定します。
 
 - `settings.gradle.kts`
-  - `maven("https://jitpack.io")`
+  - `google()` / `mavenCentral()` / `maven("https://maven.aliyun.com/repository/public")` / `maven("https://jitpack.io")`
 - `gradle/libs.versions.toml`
-  - `libausbc = "3.3.3"`
+  - `libausbc = "3.2.7"`
 - `app/build.gradle.kts`
   - `implementation(libs.libausbc)`
+  - `implementation("com.github.jiangdongguo.AndroidUSBCamera:libuvc:<libausbc版>")`
 
-バージョンを上げたい場合は、`gradle/libs.versions.toml` の `libausbc` を更新してください。
+注意点:
+- `libausbc` の 3.3.3 は JitPack で取得できない場合があります
+- 3.2.10 でも `libuvc` の取得が 404 になるため、動作確認できたのは 3.2.7 です
+- 3.2.x 系は以下に依存するため、Maven Central だけでは解決できません
+  - `com.gyf.immersionbar:immersionbar:3.0.0`
+  - `com.zlc.glide:webpdecoder:1.6.4.9.0`
+- `libausbc` は `libuvc` を `runtime` 依存にしているため、
+  `com.serenegiant.usb.USBMonitor` 型を使う場合は `libuvc` の明示追加が必要です
 
 ---
 
-## 2. Manifest（最低限の考え方）
+## 2. ざっくり構成
 
-AUSBC自体は「通常のカメラ権限」なしで動きますが、USBホスト機能を前提にする場合は、端末要件として以下を明示しておくのが安全です。
+- `CameraClient` + `CameraUvcStrategy` + `AspectRatioTextureView`
+- Compose では `AndroidView` で `AspectRatioTextureView` を保持して `openCamera(view)` に渡す
+- 接続済みデバイスは `cameraStrategy.getUsbDeviceList()` で取得し、`deviceId.toString()` を `switchCamera(id)` に使う
 
-推奨（必要に応じて）:
+---
 
-- USB Host を使う旨の宣言
-  - `android.hardware.usb.host`
+## 3. 権限とマニフェスト
+
+- `android.permission.CAMERA`
+  - `targetSdk >= 28` だと `CameraClient.openCamera()` 内でこの権限を必須扱いされる
+  - 付与されていないとプレビューが開始されない
+- `android.permission.WRITE_EXTERNAL_STORAGE`
+  - `captureImage()` 内でストレージ権限チェックが走るため、保存時に必要
+  - Android 10+ ではスコープストレージの影響があるので `getExternalFilesDir()` を使うのが安全
+- `android.hardware.usb.host`
+  - USB Host 必須なら `required="true"` を宣言
 
 注意:
-- USB attach を自動検知して起動したい場合は、`intent-filter` / `device_filter.xml` / `BroadcastReceiver` が必要になります。
-- 本ドキュメントではまず「アプリ起動 → 接続済みデバイスを開く」ルートを基本にします（最小構成）。
+- USB attach を自動検知して起動したい場合は、`intent-filter` / `device_filter.xml` / `BroadcastReceiver` が必要になります
+- 本ドキュメントでは「アプリ起動 → 接続済みデバイスを開く」ルートを基本にしています
 
 ---
 
-## 3. Composeでの基本方針（重要）
+## 4. USB許可 / オープンの流れ
 
-AUSBCの元READMEは `CameraFragment` / `CameraActivity` を継承する使い方が中心ですが、Composeでは次のどちらかの方針が現実的です。
+- `CameraUvcStrategy.register()` が `USBMonitor` を登録し、USB attach/detach を監視
+- attach 時に `requestCameraPermission()` が内部的に呼ばれ、USB許可ダイアログが出る
+- 許可後に `onConnect` が入り、`startPreview()` が内部で呼ばれる
+- `openCamera(view)` は描画用の `SurfaceTexture` をセットし、以後の preview 開始に備える
 
-### 方針A（最短で動かす）: Fragment（CameraFragment）を使い、Composeはホスト役
-- 既存のAUSBCの設計に沿うので動かしやすい
-- ただし Composeだけで閉じず、Fragment/Viewのライフサイクルを併用する
+Composeでは、次のライフサイクル制御が基本です。
 
-### 方針B（Compose寄り）: Controller層 + AndroidViewでTextureView/SurfaceViewをホスト
-- UIはComposeに寄せられる
-- 代わりにUSB許可やopen/closeの制御を自前で整理する必要がある
-
-このプロジェクトは Compose のみの雛形なので、ここでは **方針B（Compose寄り）** を中心に「最低限動く」考え方を説明します。
-
----
-
-## 4. USB許可（requestPermission）の流れ
-
-UVCカメラを開くまでの流れは概ねこの順です。
-
-1. `UsbManager.deviceList` から接続済みUSBデバイス一覧を取得
-2. UVCっぽいデバイス（もしくはユーザーが選んだデバイス）を決める
-3. `UsbManager.hasPermission(device)` を確認
-4. permissionがなければ `UsbManager.requestPermission(device, pendingIntent)`
-5. `BroadcastReceiver` で permission結果を受け取り
-6. 許可されていたら AUSBC 側のクライアントで open → preview開始
-
-Composeでは、`BroadcastReceiver` の登録/解除を `DisposableEffect` で管理するのが定石です。
+- `LifecycleEventObserver` で `register/unRegister` と `closeCamera` を制御
+  - `ON_START`: `register()`
+  - `ON_STOP`: `closeCamera()`
+  - `ON_DESTROY`: `unRegister()`
+- `IDeviceConnectCallBack` で接続/切断イベントを受けてUI更新
 
 ---
 
@@ -90,23 +89,21 @@ AUSBCは内部的に `TextureView/SurfaceView`（またはライブラリ提供�
 Composeでは `AndroidView` を使って、その **Viewインスタンスを安定して保持** し、open時にそれを渡します。
 
 ポイント:
-- `AndroidView` の `factory` で作った `TextureView` を、`remember { ... }` に近い扱いで保持する
-- Composableの再コンポーズで View が作り直されるとプレビューが途切れやすいので注意
-
-### 最小UIイメージ（概念）
-
-- `UvcPreview()`
-  - `AndroidView { TextureView(context) }`
-- `UvcScreen()`
-  - 接続デバイスの列挙
-  - 「Open」「Close」「Capture」ボタン
-  - `UvcPreview()` を表示
-
-※ 実コードはプロジェクトの設計（State管理、DI、Navigation）によって置き場所が変わるため、まずは `MainActivity` 1ファイルにまとめて動作確認 → 後で分割、がやりやすいです。
+- `AspectRatioTextureView` は `remember { ... }` で生成して使い回す
+- Composableの再コンポーズで View が再生成されるとプレビューが途切れやすいので注意
 
 ---
 
-## 6. カメラ設定（CameraRequest）
+## 6. デバイス選択と切り替え
+
+- `getUsbDeviceList()` は UVC とフィルタ済みデバイスが対象
+- 3.2.x 系では `getUsbDeviceList()` が `null` を返すことがあるので `isNullOrEmpty()` でガードする
+- `switchCamera(id)` の `id` は `UsbDevice.deviceId` の `String`
+- 既に同じカメラが開いている場合は切り替えが無視される
+
+---
+
+## 7. カメラ設定（CameraRequest）
 
 AUSBCでは `CameraRequest` でプレビュー解像度・レンダリング方式などを指定できます。
 
@@ -122,25 +119,9 @@ AUSBCでは `CameraRequest` でプレビュー解像度・レンダリング方�
 
 ---
 
-## 7. ライフサイクル（open/closeの目安）
+## 8. キャプチャ（静止画 / 動画 / 音声）
 
-Composeでは画面遷移やバックグラウンド遷移で View が破棄されずに残ることがあります。
-USBデバイスはハンドルリークしやすいので、以下を基本にしてください。
-
-- 画面が見えている間だけ open
-- `onStop` 相当で close
-- `DisposableEffect` で receiver解除 / クライアント解放
-
-典型:
-- `LifecycleEventObserver` を使い、
-  - `ON_START`: 必要ならpermission確認・open
-  - `ON_STOP`: close
-
----
-
-## 8. 撮影/録画（AUSBC API）
-
-AUSBC（CameraFragment/CameraActivity系）で提供される代表的なAPIは以下です（元READMEより）。
+代表的なAPI（元READMEより）:
 
 - 静止画: `captureImage(callBack, savePath)`
 - 録画: `captureVideoStart(callBack, path, durationInSec)` / `captureVideoStop()`
@@ -154,25 +135,30 @@ AUSBC（CameraFragment/CameraActivity系）で提供される代表的なAPIは�
   - まずは `context.getExternalFilesDir(null)` 配下（アプリ専用領域）に保存
   - 共有ギャラリーへ出したい場合は `MediaStore` を使う
 
+注意:
+- 3.2.x 系では `ICaptureCallBack.onError` / `onComplete` の引数が nullable なので null ハンドリングしておく
+
 ---
 
 ## 9. トラブルシュート
 
 ### 黒画面になる
-- USB permission が許可されていない
+- `CAMERA` 権限不足
+- USB許可未承認
 - `TextureView/Surface` が生成される前に open している
 - 解像度/フォーマットがカメラ非対応（まず 640x480 + MJPEG/YUYV を試す）
 - OTG給電不足（ハブ/ケーブルを見直す）
+
+### 何も出ない
+- `register()` していない / USB attach イベントが拾えていない
+
+### 保存されない
+- 保存先ディレクトリと `WRITE_EXTERNAL_STORAGE` を確認
 
 ### 接続が不安定
 - セルフパワーUSBハブを使う
 - 接続ケーブルを短くする
 - カメラ側が高解像度で電力/帯域を使いすぎている → 解像度を下げる
-
-### 録画ファイルが出てこない
-- 保存パスが書き込み不可
-- duration指定や stop 呼び出しの不整合
-- まずはアプリ専用ディレクトリに保存して確認
 
 ---
 
@@ -188,4 +174,3 @@ AUSBC（CameraFragment/CameraActivity系）で提供される代表的なAPIは�
 
 - `docs/AndroidUVCCameraOriginalREADME.md`
   - CameraRequest、capture、MultiCameraの説明・API一覧
-
