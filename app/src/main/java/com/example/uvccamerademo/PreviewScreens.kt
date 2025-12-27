@@ -22,13 +22,13 @@ fun UvcPreviewScreenPreview() {
     val devices = listOf(
         UvcDeviceInfo(
             id = "1001",
-            name = "UVC Camera",
+            name = "UVCカメラ",
             vendorId = 4660,
             productId = 22136
         ),
         UvcDeviceInfo(
             id = "1002",
-            name = "USB Capture",
+            name = "USBキャプチャ",
             vendorId = 11325,
             productId = 8
         )
@@ -36,7 +36,7 @@ fun UvcPreviewScreenPreview() {
     UVCCameraDemoTheme {
         UvcPreviewScreenContent(
             previewAspectRatio = selectedResolution.width.toFloat() / selectedResolution.height,
-            statusMessage = "Preview mode",
+            statusMessage = "プレビュー表示中",
             isCameraOpened = true,
             isRecording = true,
             isFinalizing = false,
@@ -57,7 +57,7 @@ fun UvcPreviewScreenPreview() {
                     modifier = contentModifier.background(MaterialTheme.colorScheme.surfaceVariant),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(text = "Camera preview")
+                    Text(text = "プレビュー")
                 }
             }
         )

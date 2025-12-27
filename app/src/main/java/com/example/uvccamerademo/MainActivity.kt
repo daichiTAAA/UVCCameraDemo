@@ -21,6 +21,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
@@ -30,17 +31,23 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -55,6 +62,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.platform.LocalView
@@ -194,7 +204,7 @@ private fun UvcPreviewScreen(
     val deviceList = remember { mutableStateListOf<UvcDeviceInfo>() }
     var selectedDeviceId by remember { mutableStateOf<String?>(null) }
     var statusMessage by remember {
-        mutableStateOf(if (isPreview) "Preview mode" else "Idle")
+        mutableStateOf(if (isPreview) "プレビュー表示中" else "待機中")
     }
     var isCameraOpened by remember { mutableStateOf(false) }
     var isRecording by remember { mutableStateOf(false) }
@@ -262,28 +272,28 @@ private fun UvcPreviewScreen(
             true
         }
         if (!updated) {
-            statusMessage = "Resolution not supported: ${option.label}"
+            statusMessage = "解像度未対応: ${option.label}"
         } else {
             cameraRequest.previewWidth = option.width
             cameraRequest.previewHeight = option.height
             selectedResolution = option
-            statusMessage = "Resolution set: ${option.label}"
+            statusMessage = "解像度設定: ${option.label}"
         }
     }
 
     fun openCamera() {
         if (isPreview) {
-            statusMessage = "Preview mode (camera disabled)"
+            statusMessage = "プレビューではカメラを使用できません"
             return
         }
         if (selectedDeviceId == null) {
-            statusMessage = "No UVC device selected"
+            statusMessage = "UVCデバイスが未選択です"
         } else {
             val view = cameraView ?: return
             val client = cameraClient ?: return
             client.openCamera(view, false)
             client.switchCamera(selectedDeviceId!!)
-            statusMessage = "Open requested"
+            statusMessage = "カメラを開いています"
         }
     }
 
@@ -291,22 +301,22 @@ private fun UvcPreviewScreen(
         if (isRecording) {
             recorder?.stop()
             isFinalizing = true
-            statusMessage = "Stopping recording..."
+            statusMessage = "録画停止中..."
         }
     }
 
     val startRecording = startRecording@{
         if (isPreview) {
-            statusMessage = "Preview mode (record disabled)"
+            statusMessage = "プレビューでは録画できません"
             return@startRecording
         }
         if (!isCameraOpened) {
-            statusMessage = "Open the camera first"
+            statusMessage = "先にカメラを開いてください"
             return@startRecording
         }
         val file = recordingRepository.createRecordingFile()
         if (file == null) {
-            statusMessage = "Storage not available"
+            statusMessage = "保存先がありません"
             return@startRecording
         }
         isFinalizing = false
@@ -318,9 +328,9 @@ private fun UvcPreviewScreen(
                     recordingElapsedMs = 0L
                     isRecording = true
                     statusMessage = if (createdRecorder?.isAudioEnabled == true) {
-                        "Recording..."
+                        "録画中..."
                     } else {
-                        "Recording (audio disabled)..."
+                        "録画中（音声なし）..."
                     }
                 }
             }
@@ -331,7 +341,7 @@ private fun UvcPreviewScreen(
                     recordingStartAt = null
                     isFinalizing = false
                     recorder = null
-                    statusMessage = "Recording failed: ${error ?: "Unknown error"}"
+                    statusMessage = "録画に失敗: ${error ?: "不明なエラー"}"
                 }
             }
 
@@ -341,7 +351,7 @@ private fun UvcPreviewScreen(
                     recordingStartAt = null
                     isFinalizing = false
                     recorder = null
-                    statusMessage = "Saved: ${path ?: "Unknown path"}"
+                    statusMessage = "保存しました: ${path ?: "不明なパス"}"
                 }
             }
         }
@@ -353,7 +363,7 @@ private fun UvcPreviewScreen(
             callback = callback
         )
         if (!createdRecorder.start()) {
-            statusMessage = "Recording failed to start"
+            statusMessage = "録画開始に失敗しました"
             return@startRecording
         }
         recorder = createdRecorder
@@ -364,15 +374,15 @@ private fun UvcPreviewScreen(
     } else {
         rememberLauncherForActivityResult(
             ActivityResultContracts.RequestPermission()
-        ) { granted ->
-            if (granted && pendingOpen) {
-                pendingOpen = false
-                openCamera()
-            } else if (!granted) {
-                pendingOpen = false
-                statusMessage = "Camera permission required"
-            }
+    ) { granted ->
+        if (granted && pendingOpen) {
+            pendingOpen = false
+            openCamera()
+        } else if (!granted) {
+            pendingOpen = false
+            statusMessage = "カメラ権限が必要です"
         }
+    }
     }
 
     val recordPermissionLauncher = if (isPreview) {
@@ -380,15 +390,15 @@ private fun UvcPreviewScreen(
     } else {
         rememberLauncherForActivityResult(
             ActivityResultContracts.RequestPermission()
-        ) { granted ->
-            if (granted && pendingRecord) {
-                pendingRecord = false
-                startRecording()
-            } else if (!granted) {
-                pendingRecord = false
-                statusMessage = "Audio permission required"
-            }
+    ) { granted ->
+        if (granted && pendingRecord) {
+            pendingRecord = false
+            startRecording()
+        } else if (!granted) {
+            pendingRecord = false
+            statusMessage = "マイク権限が必要です"
         }
+    }
     }
 
     if (!isPreview && cameraClient != null && cameraStrategy != null) {
@@ -416,58 +426,58 @@ private fun UvcPreviewScreen(
 
         DisposableEffect(cameraStrategy) {
             val callback = object : IDeviceConnectCallBack {
-                override fun onAttachDev(device: UsbDevice?) {
-                    if (device == null) return
-                    mainHandler.post {
-                        statusMessage = "Device attached: ${device.deviceName}"
-                        refreshDevices()
-                    }
+            override fun onAttachDev(device: UsbDevice?) {
+                if (device == null) return
+                mainHandler.post {
+                    statusMessage = "デバイス接続: ${device.deviceName}"
+                    refreshDevices()
                 }
+            }
 
-                override fun onDetachDec(device: UsbDevice?) {
-                    if (device == null) return
-                    mainHandler.post {
-                        statusMessage = "Device detached: ${device.deviceName}"
-                        if (selectedDeviceId == device.deviceId.toString()) {
-                            selectedDeviceId = null
-                        }
-                        stopRecording()
-                        cameraClient.closeCamera()
+            override fun onDetachDec(device: UsbDevice?) {
+                if (device == null) return
+                mainHandler.post {
+                    statusMessage = "デバイス切断: ${device.deviceName}"
+                    if (selectedDeviceId == device.deviceId.toString()) {
+                        selectedDeviceId = null
+                    }
+                    stopRecording()
+                    cameraClient.closeCamera()
                         isCameraOpened = false
                         refreshDevices()
                     }
                 }
 
-                override fun onConnectDev(
-                    device: UsbDevice?,
-                    ctrlBlock: USBMonitor.UsbControlBlock?
-                ) {
-                    if (device == null) return
-                    mainHandler.post {
-                        statusMessage = "In use: ${device.deviceName}"
-                        isCameraOpened = cameraClient.isCameraOpened() == true
-                    }
+            override fun onConnectDev(
+                device: UsbDevice?,
+                ctrlBlock: USBMonitor.UsbControlBlock?
+            ) {
+                if (device == null) return
+                mainHandler.post {
+                    statusMessage = "使用中: ${device.deviceName}"
+                    isCameraOpened = cameraClient.isCameraOpened() == true
                 }
+            }
 
-                override fun onDisConnectDec(
-                    device: UsbDevice?,
-                    ctrlBlock: USBMonitor.UsbControlBlock?
-                ) {
-                    if (device == null) return
-                    mainHandler.post {
-                        statusMessage = "Disconnected: ${device.deviceName}"
-                        stopRecording()
-                        isCameraOpened = false
-                    }
+            override fun onDisConnectDec(
+                device: UsbDevice?,
+                ctrlBlock: USBMonitor.UsbControlBlock?
+            ) {
+                if (device == null) return
+                mainHandler.post {
+                    statusMessage = "接続解除: ${device.deviceName}"
+                    stopRecording()
+                    isCameraOpened = false
                 }
+            }
 
-                override fun onCancelDev(device: UsbDevice?) {
-                    if (device == null) return
-                    mainHandler.post {
-                        statusMessage = "USB permission canceled"
-                        isCameraOpened = false
-                    }
+            override fun onCancelDev(device: UsbDevice?) {
+                if (device == null) return
+                mainHandler.post {
+                    statusMessage = "USB権限が拒否されました"
+                    isCameraOpened = false
                 }
+            }
             }
             cameraStrategy.setDeviceConnectStatusListener(callback)
             onDispose { }
@@ -498,7 +508,7 @@ private fun UvcPreviewScreen(
 
     fun handleOpen() {
         if (isPreview) {
-            statusMessage = "Preview mode (camera disabled)"
+            statusMessage = "プレビューではカメラを使用できません"
             return
         }
         val hasCameraPermission = ContextCompat.checkSelfPermission(
@@ -517,12 +527,12 @@ private fun UvcPreviewScreen(
         stopRecording()
         cameraClient?.closeCamera()
         isCameraOpened = false
-        statusMessage = "Closed"
+        statusMessage = "閉じました"
     }
 
     fun handleToggleRecord() {
         if (isPreview) {
-            statusMessage = "Preview mode (record disabled)"
+            statusMessage = "プレビューでは録画できません"
             return
         }
         if (isRecording) {
@@ -547,7 +557,7 @@ private fun UvcPreviewScreen(
                 modifier = contentModifier.background(MaterialTheme.colorScheme.surfaceVariant),
                 contentAlignment = Alignment.Center
             ) {
-                Text(text = "Camera preview")
+                Text(text = "プレビュー")
             }
         } else {
             val previewView = requireNotNull(cameraView)
@@ -606,114 +616,289 @@ internal fun UvcPreviewScreenContent(
     onSelectDevice: (String) -> Unit,
     previewContent: @Composable (Modifier) -> Unit
 ) {
-    Column(
+    val backgroundBrush = Brush.verticalGradient(
+        listOf(
+            MaterialTheme.colorScheme.background,
+            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
+        )
+    )
+    val cameraStateLabel = if (isCameraOpened) "カメラ接続中" else "カメラ未接続"
+    val recordLabel = when {
+        isFinalizing -> "保存処理中..."
+        isRecording -> "録画中 ${formatDuration(recordingElapsedMs)}"
+        else -> "待機中"
+    }
+    val cameraContainer = if (isCameraOpened) {
+        MaterialTheme.colorScheme.primaryContainer
+    } else {
+        MaterialTheme.colorScheme.surfaceVariant
+    }
+    val cameraContent = if (isCameraOpened) {
+        MaterialTheme.colorScheme.onPrimaryContainer
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    val recordContainer = if (isRecording || isFinalizing) {
+        MaterialTheme.colorScheme.errorContainer
+    } else {
+        MaterialTheme.colorScheme.secondaryContainer
+    }
+    val recordContent = if (isRecording || isFinalizing) {
+        MaterialTheme.colorScheme.onErrorContainer
+    } else {
+        MaterialTheme.colorScheme.onSecondaryContainer
+    }
+    val recordButtonColors = if (isRecording) {
+        ButtonDefaults.buttonColors(
+            containerColor = MaterialTheme.colorScheme.error,
+            contentColor = MaterialTheme.colorScheme.onError
+        )
+    } else {
+        ButtonDefaults.buttonColors()
+    }
+
+    Box(
         modifier = modifier
             .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+            .background(backgroundBrush)
     ) {
-        Text(text = "UVC Camera Preview", style = MaterialTheme.typography.titleLarge)
-        previewContent(
-            Modifier
-                .fillMaxWidth()
-                .aspectRatio(previewAspectRatio)
-        )
-        Text(text = "Status: $statusMessage")
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (isRecording) {
-                Text(
-                    text = "REC ${formatDuration(recordingElapsedMs)}",
-                    color = MaterialTheme.colorScheme.error,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-            if (selectedDeviceId != null) {
-                Text(text = "Selected: $selectedDeviceId")
-            }
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = onOpen, enabled = !isCameraOpened) {
-                Text("Open")
-            }
-            OutlinedButton(
-                onClick = onClose,
-                enabled = isCameraOpened && !isFinalizing
-            ) {
-                Text("Close")
-            }
-            OutlinedButton(
-                onClick = onToggleRecord,
-                enabled = isCameraOpened && !isFinalizing
-            ) {
-                Text(if (isRecording) "Stop" else "Record")
-            }
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            resolutionOptions.forEach { option ->
-                val selected = option == selectedResolution
-                if (selected) {
-                    Button(
-                        onClick = { onApplyResolution(option) },
-                        enabled = !isRecording && !isFinalizing
-                    ) {
-                        Text(option.label)
-                    }
-                } else {
-                    OutlinedButton(
-                        onClick = { onApplyResolution(option) },
-                        enabled = !isRecording && !isFinalizing
-                    ) {
-                        Text(option.label)
-                    }
-                }
-            }
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = onRefreshDevices) {
-                Text("Refresh Devices")
-            }
-            OutlinedButton(onClick = onOpenRecordings, enabled = !isRecording && !isFinalizing) {
-                Text("Recordings")
-            }
-            if (deviceList.isEmpty()) {
-                Text(text = "No UVC devices", modifier = Modifier.align(Alignment.CenterVertically))
-            }
-        }
-        HorizontalDivider()
-        Text(text = "Devices", style = MaterialTheme.typography.titleMedium)
-        LazyColumn(
+        Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(max = 220.dp)
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            items(deviceList, key = { it.id }) { device ->
-                val deviceId = device.id
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { onSelectDevice(deviceId) }
-                        .padding(vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    RadioButton(
-                        selected = deviceId == selectedDeviceId,
-                        onClick = { onSelectDevice(deviceId) }
-                    )
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(text = device.name)
-                        Text(
-                            text = "id=$deviceId vid=${device.vendorId} pid=${device.productId}",
-                            style = MaterialTheme.typography.bodySmall
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        StatusPill(
+                            text = "カメラ: $cameraStateLabel",
+                            containerColor = cameraContainer,
+                            contentColor = cameraContent
+                        )
+                        StatusPill(
+                            text = "録画: $recordLabel",
+                            containerColor = recordContainer,
+                            contentColor = recordContent
                         )
                     }
                 }
             }
+
+            Card(
+                shape = RoundedCornerShape(18.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        StatusPill(
+                            text = selectedResolution.label,
+                            containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onTertiaryContainer
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .aspectRatio(previewAspectRatio)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                    ) {
+                        previewContent(Modifier.fillMaxSize())
+                    }
+                }
+            }
+
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            modifier = Modifier.weight(1f),
+                            onClick = onOpen,
+                            enabled = !isCameraOpened
+                        ) {
+                            Text("接続")
+                        }
+                        OutlinedButton(
+                            modifier = Modifier.weight(1f),
+                            onClick = onClose,
+                            enabled = isCameraOpened && !isFinalizing
+                        ) {
+                            Text("切断")
+                        }
+                        Button(
+                            modifier = Modifier.weight(1f),
+                            onClick = onToggleRecord,
+                            enabled = isCameraOpened && !isFinalizing,
+                            colors = recordButtonColors
+                        ) {
+                            Text(if (isRecording) "停止" else "録画")
+                        }
+                    }
+                    FilledTonalButton(
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = onOpenRecordings
+                    ) {
+                        Text("録画一覧")
+                    }
+                }
+            }
+
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text(text = "解像度", style = MaterialTheme.typography.titleMedium)
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        contentPadding = PaddingValues(horizontal = 2.dp)
+                    ) {
+                        items(resolutionOptions, key = { it.label }) { option ->
+                            FilterChip(
+                                selected = option == selectedResolution,
+                                onClick = { onApplyResolution(option) },
+                                label = { Text(option.label) },
+                                enabled = !isRecording && !isFinalizing,
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                                    selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(text = "デバイス", style = MaterialTheme.typography.titleMedium)
+                        OutlinedButton(onClick = onRefreshDevices) {
+                            Text("更新")
+                        }
+                    }
+                    if (deviceList.isEmpty()) {
+                        Text(
+                            text = "UVCデバイスがありません",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else {
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 240.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            items(deviceList, key = { it.id }) { device ->
+                                val isSelected = device.id == selectedDeviceId
+                                val containerColor = if (isSelected) {
+                                    MaterialTheme.colorScheme.secondaryContainer
+                                } else {
+                                    MaterialTheme.colorScheme.surface
+                                }
+                                val contentColor = if (isSelected) {
+                                    MaterialTheme.colorScheme.onSecondaryContainer
+                                } else {
+                                    MaterialTheme.colorScheme.onSurface
+                                }
+                                val detailColor = if (isSelected) {
+                                    MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f)
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                }
+                                Surface(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { onSelectDevice(device.id) },
+                                    color = containerColor,
+                                    contentColor = contentColor,
+                                    tonalElevation = if (isSelected) 2.dp else 0.dp,
+                                    shape = RoundedCornerShape(12.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(10.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        RadioButton(
+                                            selected = isSelected,
+                                            onClick = { onSelectDevice(device.id) }
+                                        )
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(text = device.name)
+                                            Text(
+                                                text = "id=${device.id} vid=${device.vendorId} pid=${device.productId}",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = detailColor
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
         }
-        Spacer(modifier = Modifier.height(8.dp))
+    }
+}
+
+@Composable
+private fun StatusPill(
+    text: String,
+    containerColor: Color,
+    contentColor: Color
+) {
+    Surface(
+        color = containerColor,
+        contentColor = contentColor,
+        shape = RoundedCornerShape(50)
+    ) {
         Text(
-            text = "USB permission appears after Open; preview starts when granted.",
-            style = MaterialTheme.typography.bodySmall
+            text = text,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+            style = MaterialTheme.typography.labelLarge
         )
     }
 }
@@ -738,81 +923,143 @@ private fun RecordingListScreen(
         val target = deleteTarget!!
         AlertDialog(
             onDismissRequest = { deleteTarget = null },
-            title = { Text("Delete recording?") },
+            title = { Text("録画を削除しますか？") },
             text = { Text(target.name) },
             confirmButton = {
                 TextButton(
                     onClick = {
                         val deleted = repository.deleteRecording(target)
-                        message = if (deleted) "Deleted: ${target.name}" else "Delete failed"
+                        message = if (deleted) {
+                            "削除しました: ${target.name}"
+                        } else {
+                            "削除に失敗しました"
+                        }
                         if (deleted) {
                             recordings = recordings.filterNot { it.path == target.path }
                         }
                         deleteTarget = null
                     }
                 ) {
-                    Text("Delete")
+                    Text("削除")
                 }
             },
             dismissButton = {
                 TextButton(onClick = { deleteTarget = null }) {
-                    Text("Cancel")
+                    Text("キャンセル")
                 }
             }
         )
     }
 
-    Column(
+    val backgroundBrush = Brush.verticalGradient(
+        listOf(
+            MaterialTheme.colorScheme.background,
+            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+        )
+    )
+
+    Box(
         modifier = modifier
             .fillMaxSize()
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+            .background(backgroundBrush)
     ) {
-        Text(text = "Recordings", style = MaterialTheme.typography.titleLarge)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = onBack) {
-                Text("Back")
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(text = "録画一覧", style = MaterialTheme.typography.headlineLarge)
+                Text(
+                    text = "保存したクリップ",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
-            OutlinedButton(
-                onClick = {
-                    message = null
-                    scope.launch {
-                        recordings = repository.loadRecordings()
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    FilledTonalButton(
+                        modifier = Modifier.weight(1f),
+                        onClick = onBack
+                    ) {
+                        Text("戻る")
+                    }
+                    OutlinedButton(
+                        modifier = Modifier.weight(1f),
+                        onClick = {
+                            message = null
+                            scope.launch {
+                                recordings = repository.loadRecordings()
+                            }
+                        }
+                    ) {
+                        Text("更新")
                     }
                 }
-            ) {
-                Text("Refresh")
             }
-        }
-        if (message != null) {
-            Text(text = message!!, style = MaterialTheme.typography.bodySmall)
-        }
-        if (recordings.isEmpty()) {
-            Text(text = "No recordings yet")
-        } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                items(recordings, key = { it.path }) { item ->
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-                    ) {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            Text(text = item.name, fontWeight = FontWeight.SemiBold)
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = "${formatDateTime(item.createdAt)} · ${formatFileSize(item.sizeBytes)} · ${formatDuration(item.durationMs)}",
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Button(onClick = { onPlay(item) }) {
-                                    Text("Play")
-                                }
-                                OutlinedButton(onClick = { deleteTarget = item }) {
-                                    Text("Delete")
+            if (message != null) {
+                Surface(
+                    color = MaterialTheme.colorScheme.tertiaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text(
+                        text = message!!,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+            if (recordings.isEmpty()) {
+                Surface(
+                    color = MaterialTheme.colorScheme.surface,
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text(
+                    text = "録画はありません",
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    items(recordings, key = { it.path }) { item ->
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onPlay(item) },
+                            shape = RoundedCornerShape(16.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                        ) {
+                            Column(modifier = Modifier.padding(14.dp)) {
+                                Text(text = item.name, fontWeight = FontWeight.SemiBold)
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(
+                                    text = "${formatDateTime(item.createdAt)} · ${formatFileSize(item.sizeBytes)} · ${formatDuration(item.durationMs)}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(modifier = Modifier.height(10.dp))
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Button(onClick = { onPlay(item) }) {
+                                        Text("再生")
+                                    }
+                                    OutlinedButton(onClick = { deleteTarget = item }) {
+                                        Text("削除")
+                                    }
                                 }
                             }
                         }
@@ -874,12 +1121,12 @@ private fun PlaybackScreen(
             val listener = object : Player.Listener {
                 override fun onPlayerError(error: PlaybackException) {
                     if (attemptedRepair) {
-                        errorMessage = "ExoPlayer failed: ${error.errorCodeName}"
+                        errorMessage = "ExoPlayerエラー: ${error.errorCodeName}"
                         usePlatformPlayer = true
                         return
                     }
                     attemptedRepair = true
-                    errorMessage = "Repairing file..."
+                    errorMessage = "ファイルを修復中..."
                     exoPlayer.stop()
                     scope.launch {
                         isRepairing = true
@@ -889,7 +1136,7 @@ private fun PlaybackScreen(
                             playbackToken += 1
                             errorMessage = null
                         } else {
-                            errorMessage = "Playback failed: ${error.errorCodeName}"
+                            errorMessage = "再生に失敗: ${error.errorCodeName}"
                             usePlatformPlayer = true
                         }
                         isRepairing = false
@@ -941,7 +1188,7 @@ private fun PlaybackScreen(
                             start()
                         }
                         setOnErrorListener { _, what, extra ->
-                            errorMessage = "Playback failed: MediaPlayer($what,$extra)"
+                            errorMessage = "再生に失敗: MediaPlayer($what,$extra)"
                             true
                         }
                         setVideoURI(Uri.fromFile(File(playableItem.path)))
@@ -975,7 +1222,7 @@ private fun PlaybackScreen(
     if (deleteConfirm) {
         AlertDialog(
             onDismissRequest = { deleteConfirm = false },
-            title = { Text("Delete recording?") },
+            title = { Text("録画を削除しますか？") },
             text = { Text(item.name) },
             confirmButton = {
                 TextButton(
@@ -987,12 +1234,12 @@ private fun PlaybackScreen(
                         onBack()
                     }
                 ) {
-                    Text("Delete")
+                    Text("削除")
                 }
             },
             dismissButton = {
                 TextButton(onClick = { deleteConfirm = false }) {
-                    Text("Cancel")
+                    Text("キャンセル")
                 }
             }
         )
@@ -1011,7 +1258,7 @@ private fun PlaybackScreen(
                     Text(text = errorMessage!!, color = MaterialTheme.colorScheme.error)
                 }
                 if (isRepairing) {
-                    Text(text = "Preparing video...", style = MaterialTheme.typography.bodySmall)
+                    Text(text = "動画を準備中...", style = MaterialTheme.typography.bodySmall)
                 }
             }
             OutlinedButton(
@@ -1020,42 +1267,101 @@ private fun PlaybackScreen(
                     .align(Alignment.TopEnd)
                     .padding(16.dp)
             ) {
-                Text("Exit")
+                Text("終了")
             }
         }
     } else {
-        Column(
+        val backgroundBrush = Brush.verticalGradient(
+            listOf(
+                MaterialTheme.colorScheme.background,
+                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+            )
+        )
+        Box(
             modifier = modifier
                 .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+                .background(backgroundBrush)
         ) {
-            Text(text = "Playback", style = MaterialTheme.typography.titleLarge)
-            Text(text = playableItem.name, style = MaterialTheme.typography.bodySmall)
-            if (errorMessage != null) {
-                Text(text = errorMessage!!, color = MaterialTheme.colorScheme.error)
-            }
-            if (isRepairing) {
-                Text(text = "Preparing video...", style = MaterialTheme.typography.bodySmall)
-            }
-            if (usePlatformPlayer) {
-                Text(text = "Using system player", style = MaterialTheme.typography.bodySmall)
-            }
-            PlayerSurface(
-                surfaceModifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(16f / 9f)
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = onBack) {
-                    Text("Back")
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(text = "再生", style = MaterialTheme.typography.headlineLarge)
+                    Text(
+                        text = playableItem.name,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
-                OutlinedButton(onClick = { deleteConfirm = true }) {
-                    Text("Delete")
+                if (errorMessage != null) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.errorContainer,
+                        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text(
+                            text = errorMessage!!,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
                 }
-                OutlinedButton(onClick = { isFullscreen = true }) {
-                    Text("Fullscreen")
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (isRepairing) {
+                        StatusPill(
+                            text = "準備中...",
+                            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
+                    }
+                    if (usePlatformPlayer) {
+                        StatusPill(
+                            text = "システム再生",
+                            containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onTertiaryContainer
+                        )
+                    }
+                }
+                Card(
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .aspectRatio(16f / 9f)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                    ) {
+                        PlayerSurface(surfaceModifier = Modifier.fillMaxSize())
+                    }
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    FilledTonalButton(
+                        modifier = Modifier.weight(1f),
+                        onClick = onBack
+                    ) {
+                        Text("戻る")
+                    }
+                    OutlinedButton(
+                        modifier = Modifier.weight(1f),
+                        onClick = { deleteConfirm = true }
+                    ) {
+                        Text("削除")
+                    }
+                    Button(
+                        modifier = Modifier.weight(1f),
+                        onClick = { isFullscreen = true }
+                    ) {
+                        Text("全画面")
+                    }
                 }
             }
         }
