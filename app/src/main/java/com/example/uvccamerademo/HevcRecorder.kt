@@ -20,7 +20,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 @Suppress("DEPRECATION")
 class HevcRecorder(
-    context: Context,
+    private val context: Context,
     private val width: Int,
     private val height: Int,
     private val outputFile: File,
@@ -64,7 +64,7 @@ class HevcRecorder(
             muxer = MediaMuxer(outputFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
             videoCodec = createVideoEncoder()
             if (videoCodec == null) {
-                reportError("HEVC encoder not available")
+                reportError(context.getString(R.string.error_hevc_encoder_unavailable))
                 return false
             }
             isAudioEnabled = initAudioEncoder()
@@ -78,7 +78,8 @@ class HevcRecorder(
             postOnMain { callback.onBegin() }
             return true
         } catch (e: Exception) {
-            reportError("Failed to start recording: ${e.localizedMessage}")
+            val reason = e.localizedMessage ?: context.getString(R.string.error_unknown)
+            reportError(context.getString(R.string.error_record_start_failed, reason))
             return false
         }
     }

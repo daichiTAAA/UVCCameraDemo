@@ -68,6 +68,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
@@ -118,9 +119,7 @@ private sealed interface Screen {
     data class Playback(val item: RecordingItem) : Screen
 }
 
-internal data class ResolutionOption(val width: Int, val height: Int) {
-    val label: String = "${width}x${height}"
-}
+internal data class ResolutionOption(val width: Int, val height: Int)
 
 internal data class UvcDeviceInfo(
     val id: String,
@@ -178,8 +177,8 @@ private fun UvcPreviewScreen(
     }
     val cameraRequest = remember {
         CameraRequest.Builder()
-            .setPreviewWidth(640)
-            .setPreviewHeight(480)
+            .setPreviewWidth(1920)
+            .setPreviewHeight(1080)
             .create()
     }
     val cameraStrategy = remember {
@@ -203,8 +202,10 @@ private fun UvcPreviewScreen(
 
     val deviceList = remember { mutableStateListOf<UvcDeviceInfo>() }
     var selectedDeviceId by remember { mutableStateOf<String?>(null) }
+    val previewStatus = stringResource(R.string.status_preview_mode)
+    val idleStatus = stringResource(R.string.status_idle)
     var statusMessage by remember {
-        mutableStateOf(if (isPreview) "プレビュー表示中" else "待機中")
+        mutableStateOf(if (isPreview) previewStatus else idleStatus)
     }
     var isCameraOpened by remember { mutableStateOf(false) }
     var isRecording by remember { mutableStateOf(false) }
@@ -222,7 +223,10 @@ private fun UvcPreviewScreen(
             ResolutionOption(1920, 1080)
         )
     }
-    var selectedResolution by remember { mutableStateOf(resolutionOptions.first()) }
+    val defaultResolution =
+        resolutionOptions.firstOrNull { it.width == 1920 && it.height == 1080 }
+            ?: resolutionOptions.first()
+    var selectedResolution by remember { mutableStateOf(defaultResolution) }
     val previewRotation = 0f
     val previewAspectRatio =
         selectedResolution.width.toFloat() / selectedResolution.height.toFloat()
@@ -266,34 +270,45 @@ private fun UvcPreviewScreen(
     }
 
     val applyResolution = { option: ResolutionOption ->
+        val resolutionLabel = context.getString(
+            R.string.format_resolution,
+            option.width,
+            option.height
+        )
         val updated = if (isCameraOpened && cameraClient != null) {
             cameraClient.updateResolution(option.width, option.height)
         } else {
             true
         }
         if (!updated) {
-            statusMessage = "解像度未対応: ${option.label}"
+            statusMessage = context.getString(
+                R.string.status_resolution_not_supported,
+                resolutionLabel
+            )
         } else {
             cameraRequest.previewWidth = option.width
             cameraRequest.previewHeight = option.height
             selectedResolution = option
-            statusMessage = "解像度設定: ${option.label}"
+            statusMessage = context.getString(
+                R.string.status_resolution_set,
+                resolutionLabel
+            )
         }
     }
 
     fun openCamera() {
         if (isPreview) {
-            statusMessage = "プレビューではカメラを使用できません"
+            statusMessage = context.getString(R.string.status_preview_camera_disabled)
             return
         }
         if (selectedDeviceId == null) {
-            statusMessage = "UVCデバイスが未選択です"
+            statusMessage = context.getString(R.string.status_uvc_device_not_selected)
         } else {
             val view = cameraView ?: return
             val client = cameraClient ?: return
             client.openCamera(view, false)
             client.switchCamera(selectedDeviceId!!)
-            statusMessage = "カメラを開いています"
+            statusMessage = context.getString(R.string.status_camera_opening)
         }
     }
 
@@ -301,22 +316,22 @@ private fun UvcPreviewScreen(
         if (isRecording) {
             recorder?.stop()
             isFinalizing = true
-            statusMessage = "録画停止中..."
+            statusMessage = context.getString(R.string.status_record_stopping)
         }
     }
 
     val startRecording = startRecording@{
         if (isPreview) {
-            statusMessage = "プレビューでは録画できません"
+            statusMessage = context.getString(R.string.status_preview_record_disabled)
             return@startRecording
         }
         if (!isCameraOpened) {
-            statusMessage = "先にカメラを開いてください"
+            statusMessage = context.getString(R.string.status_open_camera_first)
             return@startRecording
         }
         val file = recordingRepository.createRecordingFile()
         if (file == null) {
-            statusMessage = "保存先がありません"
+            statusMessage = context.getString(R.string.status_storage_unavailable)
             return@startRecording
         }
         isFinalizing = false
@@ -328,9 +343,9 @@ private fun UvcPreviewScreen(
                     recordingElapsedMs = 0L
                     isRecording = true
                     statusMessage = if (createdRecorder?.isAudioEnabled == true) {
-                        "録画中..."
+                        context.getString(R.string.status_recording)
                     } else {
-                        "録画中（音声なし）..."
+                        context.getString(R.string.status_recording_no_audio)
                     }
                 }
             }
@@ -341,7 +356,10 @@ private fun UvcPreviewScreen(
                     recordingStartAt = null
                     isFinalizing = false
                     recorder = null
-                    statusMessage = "録画に失敗: ${error ?: "不明なエラー"}"
+                    statusMessage = context.getString(
+                        R.string.status_recording_failed,
+                        error ?: context.getString(R.string.error_unknown)
+                    )
                 }
             }
 
@@ -351,7 +369,10 @@ private fun UvcPreviewScreen(
                     recordingStartAt = null
                     isFinalizing = false
                     recorder = null
-                    statusMessage = "保存しました: ${path ?: "不明なパス"}"
+                    statusMessage = context.getString(
+                        R.string.status_saved,
+                        path ?: context.getString(R.string.label_unknown_path)
+                    )
                 }
             }
         }
@@ -363,7 +384,7 @@ private fun UvcPreviewScreen(
             callback = callback
         )
         if (!createdRecorder.start()) {
-            statusMessage = "録画開始に失敗しました"
+            statusMessage = context.getString(R.string.status_record_start_failed)
             return@startRecording
         }
         recorder = createdRecorder
@@ -380,7 +401,7 @@ private fun UvcPreviewScreen(
             openCamera()
         } else if (!granted) {
             pendingOpen = false
-            statusMessage = "カメラ権限が必要です"
+            statusMessage = context.getString(R.string.status_camera_permission_required)
         }
     }
     }
@@ -396,7 +417,7 @@ private fun UvcPreviewScreen(
             startRecording()
         } else if (!granted) {
             pendingRecord = false
-            statusMessage = "マイク権限が必要です"
+            statusMessage = context.getString(R.string.status_audio_permission_required)
         }
     }
     }
@@ -429,7 +450,10 @@ private fun UvcPreviewScreen(
             override fun onAttachDev(device: UsbDevice?) {
                 if (device == null) return
                 mainHandler.post {
-                    statusMessage = "デバイス接続: ${device.deviceName}"
+                    statusMessage = context.getString(
+                        R.string.status_device_attached,
+                        device.deviceName
+                    )
                     refreshDevices()
                 }
             }
@@ -437,7 +461,10 @@ private fun UvcPreviewScreen(
             override fun onDetachDec(device: UsbDevice?) {
                 if (device == null) return
                 mainHandler.post {
-                    statusMessage = "デバイス切断: ${device.deviceName}"
+                    statusMessage = context.getString(
+                        R.string.status_device_detached,
+                        device.deviceName
+                    )
                     if (selectedDeviceId == device.deviceId.toString()) {
                         selectedDeviceId = null
                     }
@@ -454,7 +481,10 @@ private fun UvcPreviewScreen(
             ) {
                 if (device == null) return
                 mainHandler.post {
-                    statusMessage = "使用中: ${device.deviceName}"
+                    statusMessage = context.getString(
+                        R.string.status_device_in_use,
+                        device.deviceName
+                    )
                     isCameraOpened = cameraClient.isCameraOpened() == true
                 }
             }
@@ -465,7 +495,10 @@ private fun UvcPreviewScreen(
             ) {
                 if (device == null) return
                 mainHandler.post {
-                    statusMessage = "接続解除: ${device.deviceName}"
+                    statusMessage = context.getString(
+                        R.string.status_device_disconnected,
+                        device.deviceName
+                    )
                     stopRecording()
                     isCameraOpened = false
                 }
@@ -474,7 +507,7 @@ private fun UvcPreviewScreen(
             override fun onCancelDev(device: UsbDevice?) {
                 if (device == null) return
                 mainHandler.post {
-                    statusMessage = "USB権限が拒否されました"
+                    statusMessage = context.getString(R.string.status_usb_permission_denied)
                     isCameraOpened = false
                 }
             }
@@ -508,7 +541,7 @@ private fun UvcPreviewScreen(
 
     fun handleOpen() {
         if (isPreview) {
-            statusMessage = "プレビューではカメラを使用できません"
+            statusMessage = context.getString(R.string.status_preview_camera_disabled)
             return
         }
         val hasCameraPermission = ContextCompat.checkSelfPermission(
@@ -527,12 +560,12 @@ private fun UvcPreviewScreen(
         stopRecording()
         cameraClient?.closeCamera()
         isCameraOpened = false
-        statusMessage = "閉じました"
+        statusMessage = context.getString(R.string.status_closed)
     }
 
     fun handleToggleRecord() {
         if (isPreview) {
-            statusMessage = "プレビューでは録画できません"
+            statusMessage = context.getString(R.string.status_preview_record_disabled)
             return
         }
         if (isRecording) {
@@ -557,7 +590,7 @@ private fun UvcPreviewScreen(
                 modifier = contentModifier.background(MaterialTheme.colorScheme.surfaceVariant),
                 contentAlignment = Alignment.Center
             ) {
-                Text(text = "プレビュー")
+                Text(text = stringResource(R.string.label_preview))
             }
         } else {
             val previewView = requireNotNull(cameraView)
@@ -622,12 +655,22 @@ internal fun UvcPreviewScreenContent(
             MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
         )
     )
-    val cameraStateLabel = if (isCameraOpened) "カメラ接続中" else "カメラ未接続"
+    val cameraStateLabel = stringResource(
+        if (isCameraOpened) R.string.pill_camera_open else R.string.pill_camera_closed
+    )
     val recordLabel = when {
-        isFinalizing -> "保存処理中..."
-        isRecording -> "録画中 ${formatDuration(recordingElapsedMs)}"
-        else -> "待機中"
+        isFinalizing -> stringResource(R.string.pill_record_finalizing)
+        isRecording -> stringResource(
+            R.string.pill_recording_with_time,
+            formatDuration(recordingElapsedMs)
+        )
+        else -> stringResource(R.string.status_idle)
     }
+    val selectedResolutionLabel = stringResource(
+        R.string.format_resolution,
+        selectedResolution.width,
+        selectedResolution.height
+    )
     val cameraContainer = if (isCameraOpened) {
         MaterialTheme.colorScheme.primaryContainer
     } else {
@@ -682,12 +725,12 @@ internal fun UvcPreviewScreenContent(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         StatusPill(
-                            text = "カメラ: $cameraStateLabel",
+                            text = stringResource(R.string.label_camera_status, cameraStateLabel),
                             containerColor = cameraContainer,
                             contentColor = cameraContent
                         )
                         StatusPill(
-                            text = "録画: $recordLabel",
+                            text = stringResource(R.string.label_record_status, recordLabel),
                             containerColor = recordContainer,
                             contentColor = recordContent
                         )
@@ -709,7 +752,7 @@ internal fun UvcPreviewScreenContent(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         StatusPill(
-                            text = selectedResolution.label,
+                            text = selectedResolutionLabel,
                             containerColor = MaterialTheme.colorScheme.tertiaryContainer,
                             contentColor = MaterialTheme.colorScheme.onTertiaryContainer
                         )
@@ -743,14 +786,14 @@ internal fun UvcPreviewScreenContent(
                             onClick = onOpen,
                             enabled = !isCameraOpened
                         ) {
-                            Text("接続")
+                            Text(stringResource(R.string.action_open))
                         }
                         OutlinedButton(
                             modifier = Modifier.weight(1f),
                             onClick = onClose,
                             enabled = isCameraOpened && !isFinalizing
                         ) {
-                            Text("切断")
+                            Text(stringResource(R.string.action_close))
                         }
                         Button(
                             modifier = Modifier.weight(1f),
@@ -758,14 +801,19 @@ internal fun UvcPreviewScreenContent(
                             enabled = isCameraOpened && !isFinalizing,
                             colors = recordButtonColors
                         ) {
-                            Text(if (isRecording) "停止" else "録画")
+                            val recordText = if (isRecording) {
+                                stringResource(R.string.action_stop)
+                            } else {
+                                stringResource(R.string.action_record)
+                            }
+                            Text(recordText)
                         }
                     }
                     FilledTonalButton(
                         modifier = Modifier.fillMaxWidth(),
                         onClick = onOpenRecordings
                     ) {
-                        Text("録画一覧")
+                        Text(stringResource(R.string.label_recordings))
                     }
                 }
             }
@@ -778,16 +826,24 @@ internal fun UvcPreviewScreenContent(
                     modifier = Modifier.padding(14.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Text(text = "解像度", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        text = stringResource(R.string.label_resolution),
+                        style = MaterialTheme.typography.titleMedium
+                    )
                     LazyRow(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         contentPadding = PaddingValues(horizontal = 2.dp)
                     ) {
-                        items(resolutionOptions, key = { it.label }) { option ->
+                        items(resolutionOptions, key = { it.width to it.height }) { option ->
+                            val optionLabel = stringResource(
+                                R.string.format_resolution,
+                                option.width,
+                                option.height
+                            )
                             FilterChip(
                                 selected = option == selectedResolution,
                                 onClick = { onApplyResolution(option) },
-                                label = { Text(option.label) },
+                                label = { Text(optionLabel) },
                                 enabled = !isRecording && !isFinalizing,
                                 colors = FilterChipDefaults.filterChipColors(
                                     selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
@@ -812,14 +868,17 @@ internal fun UvcPreviewScreenContent(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(text = "デバイス", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            text = stringResource(R.string.label_devices),
+                            style = MaterialTheme.typography.titleMedium
+                        )
                         OutlinedButton(onClick = onRefreshDevices) {
-                            Text("更新")
+                            Text(stringResource(R.string.action_refresh))
                         }
                     }
                     if (deviceList.isEmpty()) {
                         Text(
-                            text = "UVCデバイスがありません",
+                            text = stringResource(R.string.label_no_devices),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -867,7 +926,12 @@ internal fun UvcPreviewScreenContent(
                                         Column(modifier = Modifier.weight(1f)) {
                                             Text(text = device.name)
                                             Text(
-                                                text = "id=${device.id} vid=${device.vendorId} pid=${device.productId}",
+                                                text = stringResource(
+                                                    R.string.label_device_details,
+                                                    device.id,
+                                                    device.vendorId,
+                                                    device.productId
+                                                ),
                                                 style = MaterialTheme.typography.bodySmall,
                                                 color = detailColor
                                             )
@@ -910,6 +974,7 @@ private fun RecordingListScreen(
     onBack: () -> Unit,
     onPlay: (RecordingItem) -> Unit
 ) {
+    val context = LocalContext.current
     var recordings by remember { mutableStateOf(emptyList<RecordingItem>()) }
     var message by remember { mutableStateOf<String?>(null) }
     var deleteTarget by remember { mutableStateOf<RecordingItem?>(null) }
@@ -923,16 +988,16 @@ private fun RecordingListScreen(
         val target = deleteTarget!!
         AlertDialog(
             onDismissRequest = { deleteTarget = null },
-            title = { Text("録画を削除しますか？") },
+            title = { Text(stringResource(R.string.dialog_delete_title)) },
             text = { Text(target.name) },
             confirmButton = {
                 TextButton(
                     onClick = {
                         val deleted = repository.deleteRecording(target)
                         message = if (deleted) {
-                            "削除しました: ${target.name}"
+                            context.getString(R.string.message_deleted, target.name)
                         } else {
-                            "削除に失敗しました"
+                            context.getString(R.string.message_delete_failed)
                         }
                         if (deleted) {
                             recordings = recordings.filterNot { it.path == target.path }
@@ -940,12 +1005,12 @@ private fun RecordingListScreen(
                         deleteTarget = null
                     }
                 ) {
-                    Text("削除")
+                    Text(stringResource(R.string.action_delete))
                 }
             },
             dismissButton = {
                 TextButton(onClick = { deleteTarget = null }) {
-                    Text("キャンセル")
+                    Text(stringResource(R.string.action_cancel))
                 }
             }
         )
@@ -970,9 +1035,12 @@ private fun RecordingListScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(text = "録画一覧", style = MaterialTheme.typography.headlineLarge)
                 Text(
-                    text = "保存したクリップ",
+                    text = stringResource(R.string.label_recordings),
+                    style = MaterialTheme.typography.headlineLarge
+                )
+                Text(
+                    text = stringResource(R.string.label_recordings_subtitle),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -991,7 +1059,7 @@ private fun RecordingListScreen(
                         modifier = Modifier.weight(1f),
                         onClick = onBack
                     ) {
-                        Text("戻る")
+                        Text(stringResource(R.string.action_back))
                     }
                     OutlinedButton(
                         modifier = Modifier.weight(1f),
@@ -1002,7 +1070,7 @@ private fun RecordingListScreen(
                             }
                         }
                     ) {
-                        Text("更新")
+                        Text(stringResource(R.string.action_refresh))
                     }
                 }
             }
@@ -1025,11 +1093,11 @@ private fun RecordingListScreen(
                     shape = RoundedCornerShape(12.dp)
                 ) {
                     Text(
-                    text = "録画はありません",
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                        text = stringResource(R.string.label_no_recordings),
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             } else {
                 LazyColumn(
@@ -1048,17 +1116,22 @@ private fun RecordingListScreen(
                                 Text(text = item.name, fontWeight = FontWeight.SemiBold)
                                 Spacer(modifier = Modifier.height(6.dp))
                                 Text(
-                                    text = "${formatDateTime(item.createdAt)} · ${formatFileSize(item.sizeBytes)} · ${formatDuration(item.durationMs)}",
+                                    text = stringResource(
+                                        R.string.format_recording_meta,
+                                        formatDateTime(item.createdAt),
+                                        formatFileSize(item.sizeBytes),
+                                        formatDuration(item.durationMs)
+                                    ),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 Spacer(modifier = Modifier.height(10.dp))
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     Button(onClick = { onPlay(item) }) {
-                                        Text("再生")
+                                        Text(stringResource(R.string.action_play))
                                     }
                                     OutlinedButton(onClick = { deleteTarget = item }) {
-                                        Text("削除")
+                                        Text(stringResource(R.string.action_delete))
                                     }
                                 }
                             }
@@ -1121,12 +1194,15 @@ private fun PlaybackScreen(
             val listener = object : Player.Listener {
                 override fun onPlayerError(error: PlaybackException) {
                     if (attemptedRepair) {
-                        errorMessage = "ExoPlayerエラー: ${error.errorCodeName}"
+                        errorMessage = context.getString(
+                            R.string.error_exoplayer,
+                            error.errorCodeName
+                        )
                         usePlatformPlayer = true
                         return
                     }
                     attemptedRepair = true
-                    errorMessage = "ファイルを修復中..."
+                    errorMessage = context.getString(R.string.error_repairing)
                     exoPlayer.stop()
                     scope.launch {
                         isRepairing = true
@@ -1136,7 +1212,10 @@ private fun PlaybackScreen(
                             playbackToken += 1
                             errorMessage = null
                         } else {
-                            errorMessage = "再生に失敗: ${error.errorCodeName}"
+                            errorMessage = context.getString(
+                                R.string.error_playback_failed,
+                                error.errorCodeName
+                            )
                             usePlatformPlayer = true
                         }
                         isRepairing = false
@@ -1188,7 +1267,11 @@ private fun PlaybackScreen(
                             start()
                         }
                         setOnErrorListener { _, what, extra ->
-                            errorMessage = "再生に失敗: MediaPlayer($what,$extra)"
+                            errorMessage = context.getString(
+                                R.string.error_playback_failed_media,
+                                what,
+                                extra
+                            )
                             true
                         }
                         setVideoURI(Uri.fromFile(File(playableItem.path)))
@@ -1222,7 +1305,7 @@ private fun PlaybackScreen(
     if (deleteConfirm) {
         AlertDialog(
             onDismissRequest = { deleteConfirm = false },
-            title = { Text("録画を削除しますか？") },
+            title = { Text(stringResource(R.string.dialog_delete_title)) },
             text = { Text(item.name) },
             confirmButton = {
                 TextButton(
@@ -1234,12 +1317,12 @@ private fun PlaybackScreen(
                         onBack()
                     }
                 ) {
-                    Text("削除")
+                    Text(stringResource(R.string.action_delete))
                 }
             },
             dismissButton = {
                 TextButton(onClick = { deleteConfirm = false }) {
-                    Text("キャンセル")
+                    Text(stringResource(R.string.action_cancel))
                 }
             }
         )
@@ -1258,7 +1341,10 @@ private fun PlaybackScreen(
                     Text(text = errorMessage!!, color = MaterialTheme.colorScheme.error)
                 }
                 if (isRepairing) {
-                    Text(text = "動画を準備中...", style = MaterialTheme.typography.bodySmall)
+                    Text(
+                        text = stringResource(R.string.label_preparing_video),
+                        style = MaterialTheme.typography.bodySmall
+                    )
                 }
             }
             OutlinedButton(
@@ -1267,7 +1353,7 @@ private fun PlaybackScreen(
                     .align(Alignment.TopEnd)
                     .padding(16.dp)
             ) {
-                Text("終了")
+                Text(stringResource(R.string.action_exit))
             }
         }
     } else {
@@ -1290,7 +1376,10 @@ private fun PlaybackScreen(
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(text = "再生", style = MaterialTheme.typography.headlineLarge)
+                    Text(
+                        text = stringResource(R.string.label_playback),
+                        style = MaterialTheme.typography.headlineLarge
+                    )
                     Text(
                         text = playableItem.name,
                         style = MaterialTheme.typography.bodyMedium,
@@ -1313,14 +1402,14 @@ private fun PlaybackScreen(
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (isRepairing) {
                         StatusPill(
-                            text = "準備中...",
+                            text = stringResource(R.string.pill_preparing),
                             containerColor = MaterialTheme.colorScheme.secondaryContainer,
                             contentColor = MaterialTheme.colorScheme.onSecondaryContainer
                         )
                     }
                     if (usePlatformPlayer) {
                         StatusPill(
-                            text = "システム再生",
+                            text = stringResource(R.string.pill_system_player),
                             containerColor = MaterialTheme.colorScheme.tertiaryContainer,
                             contentColor = MaterialTheme.colorScheme.onTertiaryContainer
                         )
@@ -1348,19 +1437,19 @@ private fun PlaybackScreen(
                         modifier = Modifier.weight(1f),
                         onClick = onBack
                     ) {
-                        Text("戻る")
+                        Text(stringResource(R.string.action_back))
                     }
                     OutlinedButton(
                         modifier = Modifier.weight(1f),
                         onClick = { deleteConfirm = true }
                     ) {
-                        Text("削除")
+                        Text(stringResource(R.string.action_delete))
                     }
                     Button(
                         modifier = Modifier.weight(1f),
                         onClick = { isFullscreen = true }
                     ) {
-                        Text("全画面")
+                        Text(stringResource(R.string.action_fullscreen))
                     }
                 }
             }
@@ -1368,35 +1457,39 @@ private fun PlaybackScreen(
     }
 }
 
+@Composable
 private fun formatDateTime(timestamp: Long): String {
-    val formatter = SimpleDateFormat("yyyy/MM/dd HH:mm:ss", Locale.US)
+    val pattern = stringResource(R.string.format_datetime)
+    val formatter = SimpleDateFormat(pattern, Locale.getDefault())
     return formatter.format(Date(timestamp))
 }
 
+@Composable
 private fun formatFileSize(bytes: Long): String {
     if (bytes < 1024) {
-        return "${bytes} B"
+        return stringResource(R.string.format_file_size_bytes, bytes)
     }
     val kb = bytes / 1024.0
     if (kb < 1024.0) {
-        return String.format(Locale.US, "%.1f KB", kb)
+        return stringResource(R.string.format_file_size_kb, kb)
     }
     val mb = kb / 1024.0
-    return String.format(Locale.US, "%.1f MB", mb)
+    return stringResource(R.string.format_file_size_mb, mb)
 }
 
+@Composable
 private fun formatDuration(durationMs: Long): String {
     if (durationMs <= 0L) {
-        return "--:--"
+        return stringResource(R.string.format_duration_unknown)
     }
     val totalSeconds = durationMs / 1000
     val hours = totalSeconds / 3600
     val minutes = (totalSeconds % 3600) / 60
     val seconds = totalSeconds % 60
     return if (hours > 0) {
-        String.format(Locale.US, "%d:%02d:%02d", hours, minutes, seconds)
+        stringResource(R.string.format_duration_hms, hours, minutes, seconds)
     } else {
-        String.format(Locale.US, "%02d:%02d", minutes, seconds)
+        stringResource(R.string.format_duration_mmss, minutes, seconds)
     }
 }
 

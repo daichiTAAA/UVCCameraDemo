@@ -1,3 +1,89 @@
 <resources>
     <string name="app_name">UVCCameraDemo</string>
+    <string name="app_title">UVCカメラ</string>
+    <string name="app_subtitle">USBカメラのプレビューと録画</string>
+
+    <string name="label_status">ステータス</string>
+    <string name="label_preview">プレビュー</string>
+    <string name="label_controls">操作</string>
+    <string name="label_resolution">解像度</string>
+    <string name="label_devices">デバイス</string>
+    <string name="label_recordings">録画一覧</string>
+    <string name="label_recordings_subtitle">保存したクリップ</string>
+    <string name="label_no_devices">UVCデバイスがありません</string>
+    <string name="label_no_recordings">録画はありません</string>
+    <string name="label_device_details">ID=%1$s VID=%2$d PID=%3$d</string>
+    <string name="label_playback">再生</string>
+    <string name="label_preparing_video">動画を準備中...</string>
+    <string name="label_unknown_path">不明なパス</string>
+    <string name="label_camera_status">カメラ: %1$s</string>
+    <string name="label_record_status">録画: %1$s</string>
+    <string name="format_resolution">%1$dx%2$d</string>
+    <string name="format_datetime">yyyy/MM/dd HH:mm:ss</string>
+    <string name="format_recording_meta">%1$s · %2$s · %3$s</string>
+    <string name="format_file_size_bytes">%1$d B</string>
+    <string name="format_file_size_kb">%.1f KB</string>
+    <string name="format_file_size_mb">%.1f MB</string>
+    <string name="format_duration_unknown">--:--</string>
+    <string name="format_duration_hms">%1$d:%2$02d:%3$02d</string>
+    <string name="format_duration_mmss">%1$02d:%2$02d</string>
+
+    <string name="action_open">接続</string>
+    <string name="action_close">切断</string>
+    <string name="action_record">録画</string>
+    <string name="action_stop">停止</string>
+    <string name="action_refresh">更新</string>
+    <string name="action_back">戻る</string>
+    <string name="action_play">再生</string>
+    <string name="action_delete">削除</string>
+    <string name="action_cancel">キャンセル</string>
+    <string name="action_fullscreen">全画面</string>
+    <string name="action_exit">終了</string>
+
+    <string name="status_preview_mode">プレビュー表示中</string>
+    <string name="status_idle">待機中</string>
+    <string name="status_resolution_not_supported">解像度未対応: %1$s</string>
+    <string name="status_resolution_set">解像度設定: %1$s</string>
+    <string name="status_preview_camera_disabled">プレビューではカメラを使用できません</string>
+    <string name="status_uvc_device_not_selected">UVCデバイスが未選択です</string>
+    <string name="status_camera_opening">カメラを開いています</string>
+    <string name="status_record_stopping">録画停止中...</string>
+    <string name="status_preview_record_disabled">プレビューでは録画できません</string>
+    <string name="status_open_camera_first">先にカメラを開いてください</string>
+    <string name="status_storage_unavailable">保存先がありません</string>
+    <string name="status_recording">録画中...</string>
+    <string name="status_recording_no_audio">録画中（音声なし）...</string>
+    <string name="status_recording_failed">録画に失敗: %1$s</string>
+    <string name="status_saved">保存しました: %1$s</string>
+    <string name="status_record_start_failed">録画開始に失敗しました</string>
+    <string name="status_camera_permission_required">カメラ権限が必要です</string>
+    <string name="status_audio_permission_required">マイク権限が必要です</string>
+    <string name="status_device_attached">デバイス接続: %1$s</string>
+    <string name="status_device_detached">デバイス切断: %1$s</string>
+    <string name="status_device_in_use">使用中: %1$s</string>
+    <string name="status_device_disconnected">接続解除: %1$s</string>
+    <string name="status_usb_permission_denied">USB権限が拒否されました</string>
+    <string name="status_closed">閉じました</string>
+
+    <string name="pill_camera_open">カメラ接続中</string>
+    <string name="pill_camera_closed">カメラ未接続</string>
+    <string name="pill_record_finalizing">保存処理中...</string>
+    <string name="pill_recording_with_time">録画中 %1$s</string>
+    <string name="pill_preparing">準備中...</string>
+    <string name="pill_system_player">システム再生</string>
+
+    <string name="dialog_delete_title">録画を削除しますか？</string>
+    <string name="message_deleted">削除しました: %1$s</string>
+    <string name="message_delete_failed">削除に失敗しました</string>
+
+    <string name="error_exoplayer">ExoPlayerエラー: %1$s</string>
+    <string name="error_hevc_encoder_unavailable">HEVCエンコーダーが利用できません</string>
+    <string name="error_record_start_failed">開始に失敗しました: %1$s</string>
+    <string name="error_repairing">ファイルを修復中...</string>
+    <string name="error_playback_failed">再生に失敗: %1$s</string>
+    <string name="error_playback_failed_media">再生に失敗: MediaPlayer(%1$d,%2$d)</string>
+    <string name="error_unknown">不明なエラー</string>
+
+    <string name="preview_device_uvc">UVCカメラ</string>
+    <string name="preview_device_usb_capture">USBキャプチャ</string>
 </resources>

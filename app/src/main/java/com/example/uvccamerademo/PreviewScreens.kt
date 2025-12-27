@@ -7,6 +7,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import com.example.uvccamerademo.ui.theme.UVCCameraDemoTheme
 
@@ -18,17 +19,19 @@ fun UvcPreviewScreenPreview() {
         ResolutionOption(1280, 720),
         ResolutionOption(1920, 1080)
     )
-    val selectedResolution = resolutionOptions[1]
+    val selectedResolution =
+        resolutionOptions.firstOrNull { it.width == 1920 && it.height == 1080 }
+            ?: resolutionOptions.first()
     val devices = listOf(
         UvcDeviceInfo(
             id = "1001",
-            name = "UVCカメラ",
+            name = stringResource(R.string.preview_device_uvc),
             vendorId = 4660,
             productId = 22136
         ),
         UvcDeviceInfo(
             id = "1002",
-            name = "USBキャプチャ",
+            name = stringResource(R.string.preview_device_usb_capture),
             vendorId = 11325,
             productId = 8
         )
@@ -36,7 +39,7 @@ fun UvcPreviewScreenPreview() {
     UVCCameraDemoTheme {
         UvcPreviewScreenContent(
             previewAspectRatio = selectedResolution.width.toFloat() / selectedResolution.height,
-            statusMessage = "プレビュー表示中",
+            statusMessage = stringResource(R.string.status_preview_mode),
             isCameraOpened = true,
             isRecording = true,
             isFinalizing = false,
@@ -57,7 +60,7 @@ fun UvcPreviewScreenPreview() {
                     modifier = contentModifier.background(MaterialTheme.colorScheme.surfaceVariant),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(text = "プレビュー")
+                    Text(text = stringResource(R.string.label_preview))
                 }
             }
         )
