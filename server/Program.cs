@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Options;
 using WebServer.Api.Requests;
 using WebServer.Application.Models;
@@ -19,8 +20,14 @@ builder.Services.AddSwaggerGen();
 builder.Services.AddSingleton<IClockPort, SystemClock>();
 builder.Services.AddSingleton<IWorkStorePort>(sp =>
 {
-    var options = sp.GetRequiredService<IOptions<StorageOptions>>();
-    var store = new JsonWorkStore(options.Value.MetadataPath);
+    var configuration = sp.GetRequiredService<IConfiguration>();
+    var connectionString = configuration.GetConnectionString("Main");
+    if (string.IsNullOrWhiteSpace(connectionString))
+    {
+        throw new InvalidOperationException("ConnectionStrings:Main is required (PostgreSQL)");
+    }
+
+    var store = new PostgresWorkStore(connectionString, sp.GetRequiredService<ILogger<PostgresWorkStore>>());
     store.InitializeAsync(CancellationToken.None).GetAwaiter().GetResult();
     return store;
 });
@@ -28,6 +35,7 @@ builder.Services.AddSingleton<IVideoStoragePort>(sp => new FileSystemVideoStorag
 builder.Services.AddSingleton<IWorkQueryPort, WorkQueryService>();
 builder.Services.AddSingleton<ISegmentDeliveryPort, SegmentDeliveryService>();
 builder.Services.AddSingleton<IIngestionAndMaintenancePort, IngestionAndMaintenanceService>();
+builder.Services.AddHostedService<MaintenanceHostedService>();
 
 var app = builder.Build();
 
@@ -38,6 +46,19 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseMiddleware<ApiKeyMiddleware>();
+
+var staticRoot = builder.Configuration.GetSection("StaticFiles").GetValue<string>("RootPath");
+if (!string.IsNullOrWhiteSpace(staticRoot))
+{
+    var fullPath = Path.GetFullPath(Path.Combine(builder.Environment.ContentRootPath, staticRoot));
+    if (Directory.Exists(fullPath))
+    {
+        var provider = new PhysicalFileProvider(fullPath);
+        app.UseDefaultFiles(new DefaultFilesOptions { FileProvider = provider });
+        app.UseStaticFiles(new StaticFileOptions { FileProvider = provider });
+        app.MapFallback(() => Results.File(Path.Combine(fullPath, "index.html"), "text/html"));
+    }
+}
 
 app.MapGet("/api/health", () => Results.Ok(new { status = "ok" }));
 

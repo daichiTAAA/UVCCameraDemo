@@ -11,4 +11,9 @@ public sealed class MaintenanceOptions
     /// When true, allows deleting segments even if not archived. Default false for safety.
     /// </summary>
     public bool AllowDeleteUnarchived { get; set; } = false;
+
+    /// <summary>
+    /// Background maintenance interval in minutes.
+    /// </summary>
+    public int BackgroundIntervalMinutes { get; set; } = 60;
 }
