@@ -63,7 +63,6 @@
     <string name="status_device_in_use">使用中: %1$s</string>
     <string name="status_device_disconnected">接続解除: %1$s</string>
     <string name="status_usb_permission_denied">USB権限が拒否されました</string>
-    <string name="status_usb_permission_requesting">USB権限を確認中...</string>
     <string name="status_closed">閉じました</string>
 
     <string name="pill_camera_open">接続中</string>

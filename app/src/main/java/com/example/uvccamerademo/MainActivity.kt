@@ -2,17 +2,12 @@ package com.example.uvccamerademo
 
 import android.Manifest
 import android.app.Activity
-import android.content.Context
 import android.content.pm.PackageManager
 import android.hardware.usb.UsbDevice
-import android.hardware.usb.UsbManager
 import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.os.SystemClock
-import android.util.Log
-import android.view.SurfaceHolder
 import android.widget.MediaController
 import android.widget.VideoView
 import androidx.activity.ComponentActivity
@@ -70,7 +65,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.platform.LocalView
@@ -98,14 +92,12 @@ import com.jiangdg.ausbc.callback.IDeviceConnectCallBack
 import com.jiangdg.ausbc.callback.IPreviewDataCallBack
 import com.jiangdg.ausbc.camera.CameraUvcStrategy
 import com.jiangdg.ausbc.camera.bean.CameraRequest
-import com.jiangdg.ausbc.render.env.RotateType
-import com.jiangdg.ausbc.widget.AspectRatioSurfaceView
+import com.jiangdg.ausbc.widget.AspectRatioTextureView
 import com.serenegiant.usb.USBMonitor
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -120,9 +112,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 }
-
-private const val TAG = "UvcDemo"
-private const val RESOLUTION_SWITCH_IGNORE_MS = 2000L
 
 private sealed interface Screen {
     object Preview : Screen
@@ -178,16 +167,12 @@ private fun UvcPreviewScreen(
     val isPreview = LocalInspectionMode.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
-    val configuration = LocalConfiguration.current
-    val usbManager = remember(context) {
-        context.getSystemService(Context.USB_SERVICE) as UsbManager
-    }
 
     val cameraView = remember {
         if (isPreview) {
             null
         } else {
-            AspectRatioSurfaceView(context)
+            AspectRatioTextureView(context)
         }
     }
     val cameraRequest = remember {
@@ -211,14 +196,11 @@ private fun UvcPreviewScreen(
                 .setCameraStrategy(cameraStrategy)
                 .setCameraRequest(cameraRequest)
                 .setEnableGLES(false)
-                .setDefaultRotateType(RotateType.ANGLE_0)
-                .openDebug(true)
                 .build()
         }
     }
 
     val deviceList = remember { mutableStateListOf<UvcDeviceInfo>() }
-    val deviceById = remember { mutableMapOf<String, UsbDevice>() }
     var selectedDeviceId by remember { mutableStateOf<String?>(null) }
     val previewStatus = stringResource(R.string.status_preview_mode)
     val idleStatus = stringResource(R.string.status_idle)
@@ -232,24 +214,7 @@ private fun UvcPreviewScreen(
     var recordingElapsedMs by remember { mutableStateOf(0L) }
     var pendingOpen by remember { mutableStateOf(false) }
     var pendingRecord by remember { mutableStateOf(false) }
-    var isStrategyActive by remember(lifecycleOwner) {
-        mutableStateOf(
-            lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
-        )
-    }
-    var isOpening by remember { mutableStateOf(false) }
-    val openRequestIssued = remember { AtomicBoolean(false) }
-    var hasIssuedSwitchRequest by remember { mutableStateOf(false) }
-    var isPreviewViewReady by remember { mutableStateOf(false) }
-    var hasRequestedUsbPermission by remember { mutableStateOf(false) }
-    var usbPermissionDenied by remember { mutableStateOf(false) }
     var recorder by remember { mutableStateOf<HevcRecorder?>(null) }
-    val previewFrameLogged = remember { AtomicBoolean(false) }
-    val pendingReopenRef = remember { arrayOfNulls<Runnable>(1) }
-    var isResolutionSwitching by remember { mutableStateOf(false) }
-    var lastResolutionSwitchAt by remember { mutableStateOf(0L) }
-    val resolutionRecoveryRef = remember { arrayOfNulls<Runnable>(1) }
-    var lastOpenAttemptAt by remember { mutableStateOf(0L) }
 
     val resolutionOptions = remember {
         listOf(
@@ -263,28 +228,8 @@ private fun UvcPreviewScreen(
             ?: resolutionOptions.first()
     var selectedResolution by remember { mutableStateOf(defaultResolution) }
     val previewRotation = 0f
-    val isPortrait = configuration.orientation == android.content.res.Configuration.ORIENTATION_PORTRAIT
-    val previewAspectRatio = if (isPortrait) {
-        selectedResolution.height.toFloat() / selectedResolution.width.toFloat()
-    } else {
+    val previewAspectRatio =
         selectedResolution.width.toFloat() / selectedResolution.height.toFloat()
-    }
-
-    fun cancelResolutionRecovery() {
-        resolutionRecoveryRef[0]?.let { mainHandler.removeCallbacks(it) }
-        resolutionRecoveryRef[0] = null
-    }
-
-    fun isResolutionSwitchWindowActive(): Boolean {
-        if (!isResolutionSwitching) {
-            return false
-        }
-        val lastSwitch = lastResolutionSwitchAt
-        if (lastSwitch == 0L) {
-            return true
-        }
-        return SystemClock.elapsedRealtime() - lastSwitch < RESOLUTION_SWITCH_IGNORE_MS
-    }
 
     val previewDataCallBack = remember {
         object : IPreviewDataCallBack {
@@ -292,26 +237,6 @@ private fun UvcPreviewScreen(
                 data: ByteArray?,
                 format: IPreviewDataCallBack.DataFormat
             ) {
-                if (!previewFrameLogged.get() && data != null) {
-                    if (previewFrameLogged.compareAndSet(false, true)) {
-                        Log.d(
-                            TAG,
-                            "preview frame received size=${data.size} format=$format"
-                        )
-                    }
-                }
-                if (data != null) {
-                    mainHandler.post {
-                        if (!isCameraOpened) {
-                            isCameraOpened = true
-                            isOpening = false
-                        }
-                        if (isResolutionSwitching) {
-                            isResolutionSwitching = false
-                            cancelResolutionRecovery()
-                        }
-                    }
-                }
                 if (data != null && format == IPreviewDataCallBack.DataFormat.NV21) {
                     recorder?.onPreviewFrame(data)
                 }
@@ -321,7 +246,6 @@ private fun UvcPreviewScreen(
 
     fun refreshDevices() {
         deviceList.clear()
-        deviceById.clear()
         if (isPreview || cameraStrategy == null) {
             selectedDeviceId = null
             return
@@ -331,7 +255,6 @@ private fun UvcPreviewScreen(
             selectedDeviceId = null
         } else {
             val mapped = devices.map { device ->
-                deviceById[device.deviceId.toString()] = device
                 UvcDeviceInfo(
                     id = device.deviceId.toString(),
                     name = device.productName ?: device.deviceName,
@@ -346,102 +269,46 @@ private fun UvcPreviewScreen(
         }
     }
 
-    fun requestUsbPermissionIfNeeded(): Boolean {
-        val targetId = selectedDeviceId ?: return false
-        val device = deviceById[targetId] ?: return false
-        if (isResolutionSwitchWindowActive()) {
-            return false
+    val applyResolution = { option: ResolutionOption ->
+        val resolutionLabel = context.getString(
+            R.string.format_resolution,
+            option.width,
+            option.height
+        )
+        val updated = if (isCameraOpened && cameraClient != null) {
+            cameraClient.updateResolution(option.width, option.height)
+        } else {
+            true
         }
-        if (usbManager.hasPermission(device)) {
-            hasRequestedUsbPermission = false
-            usbPermissionDenied = false
-            return true
+        if (!updated) {
+            statusMessage = context.getString(
+                R.string.status_resolution_not_supported,
+                resolutionLabel
+            )
+        } else {
+            cameraRequest.previewWidth = option.width
+            cameraRequest.previewHeight = option.height
+            selectedResolution = option
+            statusMessage = context.getString(
+                R.string.status_resolution_set,
+                resolutionLabel
+            )
         }
-        if (usbPermissionDenied) {
-            statusMessage = context.getString(R.string.status_usb_permission_denied)
-            return false
-        }
-        if (hasRequestedUsbPermission) {
-            return false
-        }
-        if (!hasIssuedSwitchRequest) {
-            cameraClient?.switchCamera(targetId)
-            hasIssuedSwitchRequest = true
-        }
-        hasRequestedUsbPermission = true
-        usbPermissionDenied = false
-        statusMessage = context.getString(R.string.status_usb_permission_requesting)
-        Log.d(TAG, "requesting USB permission: id=$targetId")
-        return false
-    }
-
-    fun attemptOpenIfReady() {
-        if (isResolutionSwitchWindowActive() || isPreview || !isStrategyActive || !isPreviewViewReady || !isOpening) {
-            return
-        }
-        if (isCameraOpened || cameraClient?.isCameraOpened() == true) {
-            isCameraOpened = true
-            isOpening = false
-            return
-        }
-        if (!requestUsbPermissionIfNeeded()) {
-            return
-        }
-        val targetId = selectedDeviceId ?: return
-        val view = cameraView ?: return
-        val now = SystemClock.elapsedRealtime()
-        if (now - lastOpenAttemptAt < 800L) {
-            return
-        }
-        if (!openRequestIssued.compareAndSet(false, true)) {
-            return
-        }
-        lastOpenAttemptAt = now
-        cameraRequest.cameraId = targetId
-        cameraClient?.openCamera(view, false)
-    }
-
-    fun cancelPendingReopen() {
-        pendingReopenRef[0]?.let { mainHandler.removeCallbacks(it) }
-        pendingReopenRef[0] = null
-    }
-
-    fun scheduleReopen(delayMs: Long) {
-        cancelPendingReopen()
-        val runnable = Runnable {
-            if (isPreview || !isStrategyActive || !isPreviewViewReady) {
-                return@Runnable
-            }
-            isOpening = true
-            openRequestIssued.set(false)
-            attemptOpenIfReady()
-        }
-        pendingReopenRef[0] = runnable
-        mainHandler.postDelayed(runnable, delayMs)
     }
 
     fun openCamera() {
-        if (isCameraOpened) {
-            return
-        }
         if (isPreview) {
             statusMessage = context.getString(R.string.status_preview_camera_disabled)
             return
         }
-        if (!isPreviewViewReady) {
-            return
-        }
-        val targetId = selectedDeviceId
-        if (targetId == null) {
+        if (selectedDeviceId == null) {
             statusMessage = context.getString(R.string.status_uvc_device_not_selected)
         } else {
-            isOpening = true
-            openRequestIssued.set(false)
-            hasIssuedSwitchRequest = false
-            cameraRequest.cameraId = targetId
-            attemptOpenIfReady()
+            val view = cameraView ?: return
+            val client = cameraClient ?: return
+            client.openCamera(view, false)
+            client.switchCamera(selectedDeviceId!!)
             statusMessage = context.getString(R.string.status_camera_opening)
-            Log.d(TAG, "openCamera requested: id=$targetId viewReady=$isPreviewViewReady")
         }
     }
 
@@ -528,15 +395,15 @@ private fun UvcPreviewScreen(
     } else {
         rememberLauncherForActivityResult(
             ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        if (granted && pendingOpen) {
-            pendingOpen = false
-            openCamera()
-        } else if (!granted) {
-            pendingOpen = false
-            statusMessage = context.getString(R.string.status_camera_permission_required)
+        ) { granted ->
+            if (granted && pendingOpen) {
+                pendingOpen = false
+                openCamera()
+            } else if (!granted) {
+                pendingOpen = false
+                statusMessage = context.getString(R.string.status_camera_permission_required)
+            }
         }
-    }
     }
 
     val recordPermissionLauncher = if (isPreview) {
@@ -544,23 +411,137 @@ private fun UvcPreviewScreen(
     } else {
         rememberLauncherForActivityResult(
             ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        if (granted && pendingRecord) {
-            pendingRecord = false
-            startRecording()
-        } else if (!granted) {
-            pendingRecord = false
-            statusMessage = context.getString(R.string.status_audio_permission_required)
+        ) { granted ->
+            if (granted && pendingRecord) {
+                pendingRecord = false
+                startRecording()
+            } else if (!granted) {
+                pendingRecord = false
+                statusMessage = context.getString(R.string.status_audio_permission_required)
+            }
         }
     }
+
+    if (!isPreview && cameraClient != null && cameraStrategy != null) {
+        DisposableEffect(lifecycleOwner, cameraClient, cameraStrategy) {
+            val observer = LifecycleEventObserver { _, event ->
+                when (event) {
+                    Lifecycle.Event.ON_START -> cameraStrategy.register()
+                    Lifecycle.Event.ON_STOP -> {
+                        stopRecording()
+                        cameraClient.closeCamera()
+                        isCameraOpened = false
+                    }
+                    Lifecycle.Event.ON_DESTROY -> cameraStrategy.unRegister()
+                    else -> Unit
+                }
+            }
+            lifecycleOwner.lifecycle.addObserver(observer)
+            onDispose {
+                lifecycleOwner.lifecycle.removeObserver(observer)
+                stopRecording()
+                cameraClient.closeCamera()
+                cameraStrategy.unRegister()
+            }
+        }
+
+        DisposableEffect(cameraStrategy) {
+            val callback = object : IDeviceConnectCallBack {
+                override fun onAttachDev(device: UsbDevice?) {
+                    if (device == null) return
+                    mainHandler.post {
+                        statusMessage = context.getString(
+                            R.string.status_device_attached,
+                            device.deviceName
+                        )
+                        refreshDevices()
+                    }
+                }
+
+                override fun onDetachDec(device: UsbDevice?) {
+                    if (device == null) return
+                    mainHandler.post {
+                        statusMessage = context.getString(
+                            R.string.status_device_detached,
+                            device.deviceName
+                        )
+                        if (selectedDeviceId == device.deviceId.toString()) {
+                            selectedDeviceId = null
+                        }
+                        stopRecording()
+                        cameraClient.closeCamera()
+                        isCameraOpened = false
+                        refreshDevices()
+                    }
+                }
+
+                override fun onConnectDev(
+                    device: UsbDevice?,
+                    ctrlBlock: USBMonitor.UsbControlBlock?
+                ) {
+                    if (device == null) return
+                    mainHandler.post {
+                        statusMessage = context.getString(
+                            R.string.status_device_in_use,
+                            device.deviceName
+                        )
+                        isCameraOpened = cameraClient.isCameraOpened() == true
+                    }
+                }
+
+                override fun onDisConnectDec(
+                    device: UsbDevice?,
+                    ctrlBlock: USBMonitor.UsbControlBlock?
+                ) {
+                    if (device == null) return
+                    mainHandler.post {
+                        statusMessage = context.getString(
+                            R.string.status_device_disconnected,
+                            device.deviceName
+                        )
+                        stopRecording()
+                        isCameraOpened = false
+                    }
+                }
+
+                override fun onCancelDev(device: UsbDevice?) {
+                    if (device == null) return
+                    mainHandler.post {
+                        statusMessage = context.getString(R.string.status_usb_permission_denied)
+                        isCameraOpened = false
+                    }
+                }
+            }
+            cameraStrategy.setDeviceConnectStatusListener(callback)
+            onDispose { }
+        }
+
+        LaunchedEffect(Unit) {
+            cameraClient.addPreviewDataCallBack(previewDataCallBack)
+            refreshDevices()
+        }
+
+        LaunchedEffect(selectedDeviceId, isCameraOpened) {
+            if (isCameraOpened && selectedDeviceId != null) {
+                cameraClient.switchCamera(selectedDeviceId!!)
+            }
+        }
+    }
+
+    LaunchedEffect(isRecording, recordingStartAt) {
+        if (isRecording && recordingStartAt != null) {
+            while (isRecording) {
+                recordingElapsedMs = System.currentTimeMillis() - (recordingStartAt ?: 0L)
+                delay(1000L)
+            }
+        } else {
+            recordingElapsedMs = 0L
+        }
     }
 
     fun handleOpen() {
         if (isPreview) {
             statusMessage = context.getString(R.string.status_preview_camera_disabled)
-            return
-        }
-        if (pendingOpen || isOpening || isCameraOpened) {
             return
         }
         val hasCameraPermission = ContextCompat.checkSelfPermission(
@@ -575,417 +556,11 @@ private fun UvcPreviewScreen(
         }
     }
 
-    fun handleAutoOpen() {
-        if (isResolutionSwitchWindowActive() || isPreview || !isStrategyActive || !isPreviewViewReady) {
-            return
-        }
-        val alreadyOpened = cameraClient?.isCameraOpened() == true
-        if (alreadyOpened) {
-            isCameraOpened = true
-            return
-        }
-        if (pendingOpen || isOpening || selectedDeviceId == null || isCameraOpened) {
-            return
-        }
-        handleOpen()
-    }
-
-    fun scheduleResolutionRecovery() {
-        cancelResolutionRecovery()
-        val runnable = Runnable {
-            if (!isResolutionSwitching) {
-                resolutionRecoveryRef[0] = null
-                return@Runnable
-            }
-            isResolutionSwitching = false
-            isOpening = true
-            openRequestIssued.set(false)
-            handleAutoOpen()
-            attemptOpenIfReady()
-            resolutionRecoveryRef[0] = null
-        }
-        resolutionRecoveryRef[0] = runnable
-        mainHandler.postDelayed(runnable, RESOLUTION_SWITCH_IGNORE_MS)
-    }
-
-    fun isUsbDeviceStillPresent(device: UsbDevice?): Boolean {
-        val deviceId = device?.deviceId ?: return false
-        return usbManager.deviceList.values.any { it.deviceId == deviceId }
-    }
-
-    fun applyResolution(option: ResolutionOption) {
-        val resolutionLabel = context.getString(
-            R.string.format_resolution,
-            option.width,
-            option.height
-        )
-        Log.d(TAG, "applyResolution: ${option.width}x${option.height} opened=$isCameraOpened")
-        val targetId = selectedDeviceId
-        if (targetId == null) {
-            statusMessage = context.getString(R.string.status_uvc_device_not_selected)
-            return
-        }
-        cameraRequest.cameraId = targetId
-        val supportedSizes = cameraClient?.getAllPreviewSizes(null).orEmpty()
-        val isSupported = supportedSizes.isEmpty() || supportedSizes.any {
-            it.width == option.width && it.height == option.height
-        }
-        if (!isSupported) {
-            statusMessage = context.getString(
-                R.string.status_resolution_not_supported,
-                resolutionLabel
-            )
-            return
-        }
-        cameraRequest.previewWidth = option.width
-        cameraRequest.previewHeight = option.height
-        selectedResolution = option
-        if (isPreviewViewReady) {
-            cameraView?.holder?.setFixedSize(option.width, option.height)
-            cameraView?.setAspectRatio(option.width, option.height)
-        }
-        val clientOpened = cameraClient?.isCameraOpened() == true
-        if (clientOpened) {
-            isResolutionSwitching = true
-            lastResolutionSwitchAt = SystemClock.elapsedRealtime()
-            val updated = run {
-                val strategy = cameraStrategy ?: return@run false
-                try {
-                    val method = strategy.javaClass.getDeclaredMethod(
-                        "updateResolutionInternal",
-                        Int::class.javaPrimitiveType,
-                        Int::class.javaPrimitiveType
-                    )
-                    method.isAccessible = true
-                    method.invoke(strategy, option.width, option.height)
-                    true
-                } catch (error: Exception) {
-                    Log.e(TAG, "updateResolutionInternal failed", error)
-                    false
-                }
-            }
-            if (!updated) {
-                statusMessage = context.getString(
-                    R.string.status_resolution_not_supported,
-                    resolutionLabel
-                )
-                isResolutionSwitching = false
-                return
-            }
-            statusMessage = context.getString(R.string.status_camera_opening)
-            hasIssuedSwitchRequest = false
-            openRequestIssued.set(false)
-            isCameraOpened = false
-            isOpening = false
-            previewFrameLogged.set(false)
-            scheduleResolutionRecovery()
-        } else {
-            statusMessage = context.getString(
-                R.string.status_resolution_set,
-                resolutionLabel
-            )
-            if (!isOpening) {
-                handleAutoOpen()
-            }
-        }
-    }
-
-    if (!isPreview && cameraClient != null && cameraStrategy != null) {
-        DisposableEffect(cameraView) {
-            val previewView = cameraView ?: return@DisposableEffect onDispose { }
-            val holder = previewView.holder
-            val callback = object : SurfaceHolder.Callback {
-                override fun surfaceCreated(holder: SurfaceHolder) {
-                    isPreviewViewReady = true
-                    holder.setFixedSize(
-                        cameraRequest.previewWidth,
-                        cameraRequest.previewHeight
-                    )
-                    Log.d(TAG, "surfaceCreated")
-                    handleAutoOpen()
-                    attemptOpenIfReady()
-                }
-
-                override fun surfaceChanged(
-                    holder: SurfaceHolder,
-                    format: Int,
-                    width: Int,
-                    height: Int
-                ) {
-                    Log.d(TAG, "surfaceChanged w=$width h=$height")
-                    cameraClient?.setRenderSize(width, height)
-                }
-
-                override fun surfaceDestroyed(holder: SurfaceHolder) {
-                    Log.d(TAG, "surfaceDestroyed")
-                    isPreviewViewReady = false
-                    isOpening = false
-                    isCameraOpened = false
-                    openRequestIssued.set(false)
-                    hasIssuedSwitchRequest = false
-                    cancelPendingReopen()
-                    cancelResolutionRecovery()
-                    isResolutionSwitching = false
-                    stopRecording()
-                    cameraClient?.closeCamera()
-                }
-            }
-            holder.addCallback(callback)
-            isPreviewViewReady = holder.surface.isValid
-            if (isPreviewViewReady) {
-                handleAutoOpen()
-                attemptOpenIfReady()
-            }
-            onDispose {
-                holder.removeCallback(callback)
-                isPreviewViewReady = false
-                cancelPendingReopen()
-                cancelResolutionRecovery()
-                isResolutionSwitching = false
-            }
-        }
-
-        DisposableEffect(lifecycleOwner, cameraClient, cameraStrategy) {
-            val observer = LifecycleEventObserver { _, event ->
-                when (event) {
-                    Lifecycle.Event.ON_START -> {
-                        if (!isStrategyActive) {
-                            cameraStrategy.register()
-                            isStrategyActive = true
-                        }
-                    }
-                    Lifecycle.Event.ON_STOP -> {
-                        isStrategyActive = false
-                        isOpening = false
-                        openRequestIssued.set(false)
-                        hasIssuedSwitchRequest = false
-                        cancelPendingReopen()
-                        cancelResolutionRecovery()
-                        isResolutionSwitching = false
-                        stopRecording()
-                        cameraClient.closeCamera()
-                        isCameraOpened = false
-                    }
-                    Lifecycle.Event.ON_DESTROY -> {
-                        isStrategyActive = false
-                        isOpening = false
-                        openRequestIssued.set(false)
-                        hasIssuedSwitchRequest = false
-                        cancelPendingReopen()
-                        cancelResolutionRecovery()
-                        isResolutionSwitching = false
-                        cameraStrategy.unRegister()
-                    }
-                    else -> Unit
-                }
-            }
-            lifecycleOwner.lifecycle.addObserver(observer)
-            if (!isStrategyActive &&
-                lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
-            ) {
-                cameraStrategy.register()
-                isStrategyActive = true
-            }
-            onDispose {
-                isStrategyActive = false
-                isOpening = false
-                openRequestIssued.set(false)
-                hasIssuedSwitchRequest = false
-                cancelPendingReopen()
-                cancelResolutionRecovery()
-                isResolutionSwitching = false
-                lifecycleOwner.lifecycle.removeObserver(observer)
-                stopRecording()
-                cameraClient.closeCamera()
-                cameraStrategy.unRegister()
-            }
-        }
-
-        DisposableEffect(cameraStrategy) {
-            val callback = object : IDeviceConnectCallBack {
-            override fun onAttachDev(device: UsbDevice?) {
-                if (device == null) return
-                mainHandler.post {
-                    Log.d(TAG, "onAttachDev: ${device.deviceName}")
-                    statusMessage = context.getString(
-                        R.string.status_device_attached,
-                        device.deviceName
-                    )
-                    hasRequestedUsbPermission = false
-                    usbPermissionDenied = false
-                    hasIssuedSwitchRequest = false
-                    openRequestIssued.set(false)
-                    refreshDevices()
-                    handleAutoOpen()
-                    attemptOpenIfReady()
-                }
-            }
-
-            override fun onDetachDec(device: UsbDevice?) {
-                if (device == null) return
-                mainHandler.post {
-                    statusMessage = context.getString(
-                        R.string.status_device_detached,
-                        device.deviceName
-                    )
-                    if (isResolutionSwitchWindowActive()) {
-                        return@post
-                    }
-                    if (isUsbDeviceStillPresent(device)) {
-                        Log.d(TAG, "onDetachDev ignored; device still present")
-                        openRequestIssued.set(false)
-                        hasIssuedSwitchRequest = false
-                        scheduleReopen(300L)
-                        return@post
-                    }
-                    isResolutionSwitching = false
-                    cancelResolutionRecovery()
-                    if (selectedDeviceId == device.deviceId.toString()) {
-                        selectedDeviceId = null
-                    }
-                    usbPermissionDenied = false
-                    stopRecording()
-                    cameraClient.closeCamera()
-                    isOpening = false
-                    isCameraOpened = false
-                    openRequestIssued.set(false)
-                    hasIssuedSwitchRequest = false
-                    hasRequestedUsbPermission = false
-                    cancelPendingReopen()
-                    refreshDevices()
-                }
-                }
-
-            override fun onConnectDev(
-                device: UsbDevice?,
-                ctrlBlock: USBMonitor.UsbControlBlock?
-            ) {
-                if (device == null) return
-                mainHandler.post {
-                    Log.d(TAG, "onConnectDev: ${device.deviceName}")
-                    statusMessage = context.getString(
-                        R.string.status_device_in_use,
-                        device.deviceName
-                    )
-                    usbPermissionDenied = false
-                    if (!isOpening) {
-                        isOpening = true
-                        openRequestIssued.set(false)
-                    }
-                    attemptOpenIfReady()
-                    if (isPreviewViewReady && cameraClient.isCameraOpened() == true) {
-                        isCameraOpened = true
-                        isOpening = false
-                    }
-                }
-            }
-
-            override fun onDisConnectDec(
-                device: UsbDevice?,
-                ctrlBlock: USBMonitor.UsbControlBlock?
-            ) {
-                if (device == null) return
-                mainHandler.post {
-                    Log.d(TAG, "onDisConnectDev: ${device.deviceName}")
-                    if (isResolutionSwitchWindowActive()) {
-                        return@post
-                    }
-                    if (isUsbDeviceStillPresent(device)) {
-                        Log.d(TAG, "onDisConnectDev ignored; device still present")
-                        openRequestIssued.set(false)
-                        hasIssuedSwitchRequest = false
-                        scheduleReopen(300L)
-                        return@post
-                    }
-                    isResolutionSwitching = false
-                    cancelResolutionRecovery()
-                    statusMessage = context.getString(
-                        R.string.status_device_disconnected,
-                        device.deviceName
-                    )
-                    usbPermissionDenied = false
-                    stopRecording()
-                    isOpening = false
-                    isCameraOpened = false
-                    openRequestIssued.set(false)
-                    hasIssuedSwitchRequest = false
-                    hasRequestedUsbPermission = false
-                    cancelPendingReopen()
-                }
-            }
-
-            override fun onCancelDev(device: UsbDevice?) {
-                mainHandler.post {
-                    Log.d(TAG, "onCancelDev: ${device?.deviceName}")
-                    if (isResolutionSwitchWindowActive()) {
-                        return@post
-                    }
-                    isResolutionSwitching = false
-                    cancelResolutionRecovery()
-                    statusMessage = context.getString(R.string.status_usb_permission_denied)
-                    usbPermissionDenied = true
-                    isOpening = false
-                    isCameraOpened = false
-                    openRequestIssued.set(false)
-                    hasIssuedSwitchRequest = false
-                    hasRequestedUsbPermission = false
-                    cancelPendingReopen()
-                }
-            }
-            }
-            cameraStrategy.setDeviceConnectStatusListener(callback)
-            onDispose { }
-        }
-
-        LaunchedEffect(Unit) {
-            cameraClient.addPreviewDataCallBack(previewDataCallBack)
-        }
-
-        LaunchedEffect(isStrategyActive) {
-            if (!isStrategyActive) {
-                return@LaunchedEffect
-            }
-            repeat(10) {
-                refreshDevices()
-                handleAutoOpen()
-                if (selectedDeviceId != null) {
-                    return@LaunchedEffect
-                }
-                delay(400L)
-            }
-        }
-
-        LaunchedEffect(isOpening, cameraClient, isResolutionSwitching) {
-            if (!isOpening || isResolutionSwitchWindowActive()) {
-                return@LaunchedEffect
-            }
-            repeat(12) {
-                if (cameraClient.isCameraOpened() == true) {
-                    isCameraOpened = true
-                    isOpening = false
-                    isResolutionSwitching = false
-                    cancelResolutionRecovery()
-                    return@LaunchedEffect
-                }
-                attemptOpenIfReady()
-                delay(300L)
-            }
-            isOpening = false
-            openRequestIssued.set(false)
-            isResolutionSwitching = false
-            cancelResolutionRecovery()
-        }
-    }
-
-    LaunchedEffect(isRecording, recordingStartAt) {
-        if (isRecording && recordingStartAt != null) {
-            while (isRecording) {
-                recordingElapsedMs = System.currentTimeMillis() - (recordingStartAt ?: 0L)
-                delay(1000L)
-            }
-        } else {
-            recordingElapsedMs = 0L
-        }
+    fun handleClose() {
+        stopRecording()
+        cameraClient?.closeCamera()
+        isCameraOpened = false
+        statusMessage = context.getString(R.string.status_closed)
     }
 
     fun handleToggleRecord() {
@@ -1029,16 +604,6 @@ private fun UvcPreviewScreen(
         }
     }
 
-    LaunchedEffect(selectedDeviceId, selectedResolution) {
-        val targetId = selectedDeviceId
-        if (targetId != null) {
-            cameraRequest.cameraId = targetId
-        }
-        if (!isResolutionSwitchWindowActive()) {
-            handleAutoOpen()
-        }
-    }
-
     UvcPreviewScreenContent(
         modifier = modifier,
         previewAspectRatio = previewAspectRatio,
@@ -1051,22 +616,13 @@ private fun UvcPreviewScreen(
         resolutionOptions = resolutionOptions,
         selectedResolution = selectedResolution,
         deviceList = deviceList,
+        onOpen = { handleOpen() },
+        onClose = { handleClose() },
         onToggleRecord = { handleToggleRecord() },
         onApplyResolution = { option -> applyResolution(option) },
         onRefreshDevices = { refreshDevices() },
         onOpenRecordings = onOpenRecordings,
-        onSelectDevice = { id ->
-            val wasSelected = selectedDeviceId == id
-            selectedDeviceId = id
-            if (!wasSelected) {
-                hasRequestedUsbPermission = false
-                hasIssuedSwitchRequest = false
-                cameraClient?.switchCamera(id)
-                hasIssuedSwitchRequest = true
-            } else {
-                handleAutoOpen()
-            }
-        },
+        onSelectDevice = { selectedDeviceId = it },
         previewContent = previewContent
     )
 }
@@ -1084,6 +640,8 @@ internal fun UvcPreviewScreenContent(
     resolutionOptions: List<ResolutionOption>,
     selectedResolution: ResolutionOption,
     deviceList: List<UvcDeviceInfo>,
+    onOpen: () -> Unit,
+    onClose: () -> Unit,
     onToggleRecord: () -> Unit,
     onApplyResolution: (ResolutionOption) -> Unit,
     onRefreshDevices: () -> Unit,
@@ -1215,26 +773,44 @@ internal fun UvcPreviewScreenContent(
                 shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
             ) {
-                Row(
-                    modifier = Modifier.padding(2.dp),
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Button(
-                        modifier = Modifier
-                            .weight(1f),
-                        onClick = onToggleRecord,
-                        enabled = isCameraOpened && !isFinalizing,
-                        colors = recordButtonColors
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        val recordText = if (isRecording) {
-                            stringResource(R.string.action_stop)
-                        } else {
-                            stringResource(R.string.action_record)
+                        Button(
+                            modifier = Modifier.weight(1f),
+                            onClick = onOpen,
+                            enabled = !isCameraOpened
+                        ) {
+                            Text(stringResource(R.string.action_open))
                         }
-                        Text(recordText)
+                        OutlinedButton(
+                            modifier = Modifier.weight(1f),
+                            onClick = onClose,
+                            enabled = isCameraOpened && !isFinalizing
+                        ) {
+                            Text(stringResource(R.string.action_close))
+                        }
+                        Button(
+                            modifier = Modifier.weight(1f),
+                            onClick = onToggleRecord,
+                            enabled = isCameraOpened && !isFinalizing,
+                            colors = recordButtonColors
+                        ) {
+                            val recordText = if (isRecording) {
+                                stringResource(R.string.action_stop)
+                            } else {
+                                stringResource(R.string.action_record)
+                            }
+                            Text(recordText)
+                        }
                     }
                     FilledTonalButton(
-                        modifier = Modifier
-                            .weight(1f),
+                        modifier = Modifier.fillMaxWidth(),
                         onClick = onOpenRecordings
                     ) {
                         Text(stringResource(R.string.label_recordings))
