@@ -19,8 +19,13 @@
 ## 2. 前提 / 制約
 - 利用環境はLAN内を想定（閉域）
 - アップロードは再開可能方式（tus）で、受信は `tusd` を採用する
+- tus受信口（tusd）は最初から前段にリバースプロキシを置き、最低限の防御を入れる
+  - 簡易認証: `X-Api-Key` 等（内部誤送信や想定外端末のアップロード事故の予防）
+  - IP制限: 許可リスト（allowlist）を基本
+  - サイズ上限: 1ファイル/リクエスト/合計の上限（容量枯渇の予防）
+  - 同時接続数制限/レート制限: 端末台数や帯域に合わせて上限設定
 - 動画はMP4（H.265 + AAC）を基本とし、確実なダウンロード経路（/download）を必須とする
-- ローカル保存は `recordedAt` 基準で原則7日保持し、それ以降は削除する
+- ローカル保存は `receivedAt`（サーバー受信時刻）基準で原則7日保持し、それ以降は削除する（端末時刻ズレ対策）
 - ADLSへ日次でアーカイブし、ローカル削除後もADLSから配信できる
 
 ---
@@ -56,7 +61,7 @@
 - 動画受信: tusd（tusプロトコル）
 - Webサーバー: ASP.NET（Web API + UI静的配信）
 - メタデータDB: PostgreSQL
-- ローカルストレージ: 受信済み動画（7日保持）
+- ローカルストレージ: 受信済み動画（7日保持、receivedAt基準）
 - 日次ジョブ: ADLSアップロード + ローカル7日削除
 
 ---
@@ -109,7 +114,7 @@
 - **重要**：失敗時は次回再試行できること（冪等性）
 
 ### 6.7 保持期限削除（ローカル7日）
-- **目的**：`recordedAt` 基準で7日超のローカル動画を削除
+- **目的**：`receivedAt`（サーバー受信時刻）基準で7日超のローカル動画を削除（端末時刻ズレ対策）
 - **前提**：ADLSに存在（または参照可能）
 
 ---
@@ -153,6 +158,7 @@ Use Caseは以下の抽象にのみ依存し、具体実装は外側に置く。
 - `work_id` TEXT NOT NULL
 - `segment_index` INTEGER NOT NULL
 - `recorded_at` TIMESTAMPTZ NOT NULL
+- `received_at` TIMESTAMPTZ NOT NULL
 - `duration_sec` INTEGER NULL
 - `size_bytes` BIGINT NULL
 - `local_path` TEXT NOT NULL
@@ -180,6 +186,9 @@ Use Caseは以下の抽象にのみ依存し、具体実装は外側に置く。
 - 端末→サーバー→ADLS→Web UI で同一の表現・タイムゾーンで扱う
 - DBは `TIMESTAMPTZ` を基本とし、APIはISO 8601（タイムゾーン付き）で返す
 
+補足（端末時刻ズレ対策）
+- `received_at` はサーバーが受信時に付与する時刻（`TIMESTAMPTZ`）であり、保持期限・監視用途は `received_at` を優先できるようにする。
+
 ---
 
 ## 9. Interface Adapters 設計
@@ -187,9 +196,15 @@ Use Caseは以下の抽象にのみ依存し、具体実装は外側に置く。
 #### 9.1.1 tusエンドポイント
 - 例: `http://<Server IP Address>:1080/files/`
 
+補足（防御）
+- 運用時は tusd を直接公開せず、前段のリバースプロキシ配下へ配置し、`X-Api-Key` 等の簡易認証・IP制限・サイズ上限・同時接続数制限を適用する。
+
 #### 9.1.2 受信メタデータ
 - 必須: `segmentUuid`, `workId`, `model`, `serial`, `process`, `segmentIndex`, `recordedAt`
 - 任意: `durationSec`, `deviceId`, `appVersion`
+
+サーバー側で付与/保持:
+- `receivedAt`（受信時刻、サーバー時刻）
 
 補足:
 - `segmentUuid` は端末生成の不変ID（UUID）であり、後追い紐づけや `segmentIndex` の再採番が発生しても同一セグメントを一意に識別できる。
@@ -212,7 +227,7 @@ Use Caseは以下の抽象にのみ依存し、具体実装は外側に置く。
 #### 9.2.1 共通
 - 例外時はJSONでエラーを返す（API Model）
   - 例: `{"error":"NOT_FOUND","message":"..."}`
-- 認証は必須要件ではないが、必要になった場合に前段のリバースプロキシでAPIキー検証可能にする（`X-Api-Key` 等）
+- LAN内運用でも、最初から前段のリバースプロキシで簡易認証（`X-Api-Key` 等）やIP制限などの最低限防御を入れ、内部誤送信・想定外端末からのアクセス事故を予防する
 
 #### 9.2.2 エンドポイント（最小）
 工程マスタ（Android向け）
@@ -266,7 +281,7 @@ Use Caseは以下の抽象にのみ依存し、具体実装は外側に置く。
 - 成功後、DBへ `adls_path` / `archived_at` を更新
 
 ### 10.3 ローカル7日削除
-- `recordedAt` 基準で7日超のローカル動画を削除
+- `receivedAt`（サーバー受信時刻）基準で7日超のローカル動画を削除（端末時刻ズレ対策）
 - 削除対象は「ADLSに存在する（または参照可能）」を前提
   - 例外（運用判断）: ADLS未アーカイブのまま7日超は削除しない/アラート
 

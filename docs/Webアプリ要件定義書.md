@@ -36,7 +36,8 @@ Androidアプリ（UVCCameraDemo）からLAN内サーバーへアップロード
 - serial: 機番
 - process: 工程
 - 録画セグメント: 一定間隔/作業操作で分割された録画ファイル単位。
-- recordedAt: セグメントの撮影日時。検索/保持期間/アーカイブの基準となる。
+- recordedAt: セグメントの撮影日時。検索・表示・アーカイブ（整理）の基準となる。
+- receivedAt: セグメントの受信日時（サーバー時刻）。端末時刻ズレ対策として、保持期限・監視の基準に使える。
 - segmentIndex: 同一workId内の順序を表す値。
 
 ## 5. データ要件
@@ -46,11 +47,17 @@ Androidアプリ（UVCCameraDemo）からLAN内サーバーへアップロード
 - 必須: segmentUuid, workId, model, serial, process, segmentIndex, recordedAt
 - 任意: durationSec
 
+サーバー側で付与/保持:
+- receivedAt（サーバー受信時刻、TIMESTAMPTZ）
+
 補足:
 - segmentUuid は端末がセグメント生成時に発行する不変ID（UUID）であり、重複受信（再送）・後追い紐づけ・segmentIndex再採番が発生しても同一セグメントを一意に識別できること。
 
 ### 5.2 recordedAt の一貫性
-recordedAt は検索/保持期間の基準となるため、Android→サーバー→ADLS→Web UI で同一の表現・タイムゾーンで扱えること。
+recordedAt は検索・表示の基準となるため、Android→サーバー→ADLS→Web UI で同一の表現・タイムゾーンで扱えること。
+
+補足:
+- 端末時刻ズレの影響を吸収するため、保持期限・監視用途は receivedAt（サーバー時刻）を優先できること。
 
 ### 5.3 segmentIndex の解釈
 segmentIndex は同一workId内の順序を表す値として扱えること。
@@ -102,8 +109,11 @@ segmentIndex は同一workId内の順序を表す値として扱えること。
 - ADLS上の動画も、Webアプリから再生/ダウンロードできること（ローカルに存在しない場合のフォールバックを含む）
 
 ### 6.8 保持/削除（ローカル）
-- ローカル（サーバー）に保存された動画は、原則としてrecordedAtから7日を超えたものを削除できる（自動）
+- ローカル（サーバー）に保存された動画は、原則としてreceivedAt（サーバー受信時刻）から7日を超えたものを削除できる（自動）
 	- 削除後も、WebアプリからはADLS上の動画を参照して再生/ダウンロードできること
+
+補足:
+- recordedAt の表現統一（TIMESTAMPTZ + ISO 8601）方針は維持しつつ、端末時刻ズレ対策として保持期限や監視は receivedAt 優先へ切替できる。
 
 ### 6.9 工程マスタ提供（Android向け）
 - Androidアプリが作業開始時に選択する「工程候補」を取得できるWeb APIを提供できる
