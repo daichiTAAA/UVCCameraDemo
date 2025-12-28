@@ -242,12 +242,14 @@ private fun UvcPreviewScreen(
     var hasIssuedSwitchRequest by remember { mutableStateOf(false) }
     var isPreviewViewReady by remember { mutableStateOf(false) }
     var hasRequestedUsbPermission by remember { mutableStateOf(false) }
+    var usbPermissionDenied by remember { mutableStateOf(false) }
     var recorder by remember { mutableStateOf<HevcRecorder?>(null) }
     val previewFrameLogged = remember { AtomicBoolean(false) }
     val pendingReopenRef = remember { arrayOfNulls<Runnable>(1) }
     var isResolutionSwitching by remember { mutableStateOf(false) }
     var lastResolutionSwitchAt by remember { mutableStateOf(0L) }
     val resolutionRecoveryRef = remember { arrayOfNulls<Runnable>(1) }
+    var lastOpenAttemptAt by remember { mutableStateOf(0L) }
 
     val resolutionOptions = remember {
         listOf(
@@ -344,25 +346,33 @@ private fun UvcPreviewScreen(
         }
     }
 
-    fun requestUsbPermissionIfNeeded() {
-        val targetId = selectedDeviceId ?: return
-        val device = deviceById[targetId] ?: return
+    fun requestUsbPermissionIfNeeded(): Boolean {
+        val targetId = selectedDeviceId ?: return false
+        val device = deviceById[targetId] ?: return false
         if (isResolutionSwitchWindowActive()) {
-            return
+            return false
+        }
+        if (usbManager.hasPermission(device)) {
+            hasRequestedUsbPermission = false
+            usbPermissionDenied = false
+            return true
+        }
+        if (usbPermissionDenied) {
+            statusMessage = context.getString(R.string.status_usb_permission_denied)
+            return false
+        }
+        if (hasRequestedUsbPermission) {
+            return false
         }
         if (!hasIssuedSwitchRequest) {
             cameraClient?.switchCamera(targetId)
             hasIssuedSwitchRequest = true
         }
-        if (usbManager.hasPermission(device)) {
-            return
-        }
-        if (hasRequestedUsbPermission) {
-            return
-        }
         hasRequestedUsbPermission = true
+        usbPermissionDenied = false
         statusMessage = context.getString(R.string.status_usb_permission_requesting)
         Log.d(TAG, "requesting USB permission: id=$targetId")
+        return false
     }
 
     fun attemptOpenIfReady() {
@@ -374,16 +384,19 @@ private fun UvcPreviewScreen(
             isOpening = false
             return
         }
+        if (!requestUsbPermissionIfNeeded()) {
+            return
+        }
         val targetId = selectedDeviceId ?: return
         val view = cameraView ?: return
-        val device = deviceById[targetId] ?: return
-        if (!usbManager.hasPermission(device)) {
-            requestUsbPermissionIfNeeded()
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastOpenAttemptAt < 800L) {
             return
         }
         if (!openRequestIssued.compareAndSet(false, true)) {
             return
         }
+        lastOpenAttemptAt = now
         cameraRequest.cameraId = targetId
         cameraClient?.openCamera(view, false)
     }
@@ -426,7 +439,6 @@ private fun UvcPreviewScreen(
             openRequestIssued.set(false)
             hasIssuedSwitchRequest = false
             cameraRequest.cameraId = targetId
-            requestUsbPermissionIfNeeded()
             attemptOpenIfReady()
             statusMessage = context.getString(R.string.status_camera_opening)
             Log.d(TAG, "openCamera requested: id=$targetId viewReady=$isPreviewViewReady")
@@ -800,6 +812,7 @@ private fun UvcPreviewScreen(
                         device.deviceName
                     )
                     hasRequestedUsbPermission = false
+                    usbPermissionDenied = false
                     hasIssuedSwitchRequest = false
                     openRequestIssued.set(false)
                     refreshDevices()
@@ -830,6 +843,7 @@ private fun UvcPreviewScreen(
                     if (selectedDeviceId == device.deviceId.toString()) {
                         selectedDeviceId = null
                     }
+                    usbPermissionDenied = false
                     stopRecording()
                     cameraClient.closeCamera()
                     isOpening = false
@@ -853,6 +867,7 @@ private fun UvcPreviewScreen(
                         R.string.status_device_in_use,
                         device.deviceName
                     )
+                    usbPermissionDenied = false
                     if (!isOpening) {
                         isOpening = true
                         openRequestIssued.set(false)
@@ -888,6 +903,7 @@ private fun UvcPreviewScreen(
                         R.string.status_device_disconnected,
                         device.deviceName
                     )
+                    usbPermissionDenied = false
                     stopRecording()
                     isOpening = false
                     isCameraOpened = false
@@ -899,15 +915,15 @@ private fun UvcPreviewScreen(
             }
 
             override fun onCancelDev(device: UsbDevice?) {
-                if (device == null) return
                 mainHandler.post {
-                    Log.d(TAG, "onCancelDev: ${device.deviceName}")
+                    Log.d(TAG, "onCancelDev: ${device?.deviceName}")
                     if (isResolutionSwitchWindowActive()) {
                         return@post
                     }
                     isResolutionSwitching = false
                     cancelResolutionRecovery()
                     statusMessage = context.getString(R.string.status_usb_permission_denied)
+                    usbPermissionDenied = true
                     isOpening = false
                     isCameraOpened = false
                     openRequestIssued.set(false)

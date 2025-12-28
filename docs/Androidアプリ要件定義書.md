@@ -48,6 +48,7 @@ UVC対応USBカメラを利用し、Android端末上で以下を提供する。
 ## 4. 用語
 - 作業: 開始〜終了までを1単位として扱う
 - 作業ID（workId）: 作業を一意に識別するID（例: UUID）
+- セグメント不変ID（segmentUuid）: 端末が録画セグメント生成時に発行する不変ID（UUID）。後追い紐づけやsegmentIndex再採番が行われても変化しない。
 - 録画セグメント: 分割単位となる録画ファイル
 - 未割当セグメント: 作業IDに紐づいていないセグメント
 - 割当済みセグメント: 作業IDに紐づくセグメント
@@ -188,7 +189,10 @@ UVC対応USBカメラを利用し、Android端末上で以下を提供する。
 - 方式
 	- 再開可能アップロード（tus、または同等方式）
 - 送信メタデータ（最低限）
-	- workId, model, serial, process, segmentIndex, recordedAt
+	- segmentUuid, workId, model, serial, process, segmentIndex, recordedAt
+
+補足:
+- segmentIndex は後追い紐づけ等で再採番され得るため、サーバー側での「同一セグメント」識別・冪等処理・重複判定・ログ相関の中心は segmentUuid とする。
 
 補足:
 - アップロード済みセグメントは、端末空き容量確保のため自動削除の対象となる

@@ -65,7 +65,7 @@
 ### 5.1 レイヤー定義
 - **Domain（Entities）**
   - ドメイン概念: `Work` / `Segment`
-  - 不変条件例: 作業キーの必須性、セグメントindexの一意性（同一work内）、recordedAtの整合性
+  - 不変条件例: 作業キーの必須性、セグメント不変ID（`segmentUuid`）の一意性、セグメントindexの一意性（同一work内）、recordedAtの整合性
 - **Application（Use Cases）**
   - 入力→処理→出力で表現する
   - DB/FS/ADLS/tusd等の詳細は知らず、Port interface越しに入出力する
@@ -149,6 +149,7 @@ Use Caseは以下の抽象にのみ依存し、具体実装は外側に置く。
 
 `segments`（セグメント単位）
 - `segment_id` UUID PRIMARY KEY
+- `segment_uuid` UUID NOT NULL
 - `work_id` TEXT NOT NULL
 - `segment_index` INTEGER NOT NULL
 - `recorded_at` TIMESTAMPTZ NOT NULL
@@ -160,6 +161,13 @@ Use Caseは以下の抽象にのみ依存し、具体実装は外側に置く。
 - `archived_at` TIMESTAMPTZ NULL
 - `created_at` TIMESTAMPTZ NOT NULL
 - `updated_at` TIMESTAMPTZ NOT NULL
+
+制約（同一セグメントの一意性）
+- `segments.segment_uuid` は一意（UNIQUE）とする（端末生成の不変ID）
+
+補足:
+- `segment_id` は Web API で参照するためのサーバー採番ID（内部ID）。
+- `segment_uuid` は Android端末がセグメント生成時に発行する不変ID（UUID）であり、冪等処理・重複判定・ログ相関の中心とする。
 
 外部キー
 - `segments.work_id` → `works.work_id`
@@ -180,8 +188,12 @@ Use Caseは以下の抽象にのみ依存し、具体実装は外側に置く。
 - 例: `http://<Server IP Address>:1080/files/`
 
 #### 9.1.2 受信メタデータ
-- 必須: `workId`, `model`, `serial`, `process`, `segmentIndex`, `recordedAt`
+- 必須: `segmentUuid`, `workId`, `model`, `serial`, `process`, `segmentIndex`, `recordedAt`
 - 任意: `durationSec`, `deviceId`, `appVersion`
+
+補足:
+- `segmentUuid` は端末生成の不変ID（UUID）であり、後追い紐づけや `segmentIndex` の再採番が発生しても同一セグメントを一意に識別できる。
+- サーバー側の冪等処理・重複判定・ログ相関の中心は `segmentUuid` とする（`segmentIndex` は揺れるため）。
 
 #### 9.1.3 完了フック（tusd → Webサーバー）
 アップロード完了時に、tusdのフック（HTTP通知または実行フック）でWebサーバーへ完了イベントを渡す。
@@ -193,7 +205,7 @@ Use Caseは以下の抽象にのみ依存し、具体実装は外側に置く。
 **UploadCompleted（Use Case）の責務（冪等）**
 1) 一時ファイルを正式保存先へ移動（必要な場合）
 2) 命名規則に従いリネーム
-3) DBへ `works` / `segments` を登録または更新
+3) DBへ `works` / `segments` を登録または更新（`segmentUuid` をキーにUpsert/冪等化）
 4) 失敗時はログへ詳細を記録し、再処理可能な状態（再実行でDB不整合にならない）を保つ
 
 ### 9.2 Web API（HTTP Controller）
@@ -234,12 +246,14 @@ Use Caseは以下の抽象にのみ依存し、具体実装は外側に置く。
 - Range無しは `200 OK` で全体返却
 
 ### 9.3 重複アップロード（再送）時の扱い
-- `segment_id` はサーバー採番（UUID）とし、DBの一意制約で破綻しないようにする
-- 重複候補キー（推奨）
-  - `workId + recordedAt + segmentIndex + sizeBytes` が一致した場合は同一候補
+- `segment_id` はサーバー採番（UUID）とし、Web API（`/api/segments/{segmentId}`）等の参照IDとして用いる
+- 端末生成の `segmentUuid` を同一セグメント識別の中心とし、DBで一意制約（`segments.segment_uuid` UNIQUE）を持つ
+- 重複判定/冪等処理
+  - `segmentUuid` が一致した場合は同一セグメントとして扱い、tusd再通知/再送でもDBが増殖しないようにする
+  - `segmentUuid` が異なる場合は別セグメントとして扱う（内容が同一に見えても別扱い）
 - 採用方針（基本）
-  - 先着を正として維持し、後着は別ファイルとして保管（ファイル名に `_dupN`）
-  - UIには正（先着）を表示
+  - 同一 `segmentUuid` の再送は冪等に処理し、同一行を更新（上書き/無視のルールは実装で確定）
+  - 異なる `segmentUuid` の重複（人為/端末不具合等）は「別セグメント」として保持し、UIにも別として表示
 
 ---
 
@@ -260,7 +274,7 @@ Use Caseは以下の抽象にのみ依存し、具体実装は外側に置く。
 
 ## 11. エラーハンドリング / 冪等性 / 整合性
 ### 11.1 エラーハンドリング（基本）
-- 失敗を握りつぶさず、原因が追えるログ（相関ID/segmentId/workId等）を残す
+- 失敗を握りつぶさず、原因が追えるログ（相関ID/segmentUuid/segmentId/workId等）を残す
 - 外部I/O（DB/FS/ADLS）の例外はUse Case境界で扱い、API層へは安定したエラー形式で返す
 
 ### 11.2 冪等性

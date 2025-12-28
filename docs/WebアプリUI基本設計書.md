@@ -76,6 +76,9 @@ flowchart LR
 - サーバー側の `stream` はHTTP Range対応を基本とする
 - Range非対応の場合はシーク不可になり得る（UIはエラー表示せず、再生可否とダウンロード導線を優先）
 
+補足:
+- UIが扱う `segmentId` はサーバー側の参照IDであり、Android端末側の不変ID（`segmentUuid`）とは別物である。
+
 ## 5. API I/F（UI利用観点）
 ### 5.1 共通
 - エラーはJSON（例: `{"error":"NOT_FOUND","message":"..."}`）

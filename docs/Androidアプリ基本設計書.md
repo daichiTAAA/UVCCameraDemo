@@ -285,13 +285,13 @@ flowchart LR
 	- startedAt: Long
 	- endedAt: Long?（終了時のみ）
 - Segment
-	- segmentId: String（UUID）
+	- segmentUuid: String（UUID、端末生成の不変ID）
 	- path: String（ファイル絶対パス）
 	- recordedAt: Long（セグメント開始時刻）
 	- durationMs: Long?（確定後に更新）
 	- sizeBytes: Long?（確定後に更新）
 	- workId: String?（未割当は null）
-	- segmentIndex: Int?（workId 内での通番。確定時に採番し直す方針でも良い）
+	- segmentIndex: Int?（workId 内での通番。後追い紐づけ等で再採番され得る）
 	- uploadState: UploadState（未割当は常に NONE）
 	- uploadRemoteId: String?（tus の upload URL/リソースID）
 	- uploadBytesSent: Long
@@ -348,6 +348,11 @@ flowchart LR
 
 ### 11.3 送信メタデータ
 - 最低限: workId, model, serial, process, segmentIndex, recordedAt
+- 最低限: segmentUuid, workId, model, serial, process, segmentIndex, recordedAt
+
+補足:
+- segmentUuid は録画セグメント生成時に端末で発行し、その後の後追い紐づけやsegmentIndex再採番が行われても不変とする。
+- サーバー側の冪等処理・重複判定・相関IDの中心は segmentUuid とする（segmentIndex は揺れるため）。
 - メタデータの送信方法（ヘッダ/別API/フォーム等）はサーバー仕様に合わせる
 
 ### 11.4 リトライ/再開

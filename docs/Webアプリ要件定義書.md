@@ -43,14 +43,20 @@ Androidアプリ（UVCCameraDemo）からLAN内サーバーへアップロード
 ### 5.1 受信メタデータ
 受信時に、動画と紐づく作業メタデータを受け取り、検索可能な形で保持できること。
 
-- 必須: workId, model, serial, process, segmentIndex, recordedAt
+- 必須: segmentUuid, workId, model, serial, process, segmentIndex, recordedAt
 - 任意: durationSec
+
+補足:
+- segmentUuid は端末がセグメント生成時に発行する不変ID（UUID）であり、重複受信（再送）・後追い紐づけ・segmentIndex再採番が発生しても同一セグメントを一意に識別できること。
 
 ### 5.2 recordedAt の一貫性
 recordedAt は検索/保持期間の基準となるため、Android→サーバー→ADLS→Web UI で同一の表現・タイムゾーンで扱えること。
 
 ### 5.3 segmentIndex の解釈
 segmentIndex は同一workId内の順序を表す値として扱えること。
+
+補足:
+- segmentIndex は後追い紐づけ等により再採番され得るため、「同一セグメント」の識別は segmentUuid を正とする。
 
 ## 6. 機能要件
 ### 6.1 受信（アップロード）
