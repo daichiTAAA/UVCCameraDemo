@@ -1,0 +1,13 @@
+# Build outputs
+bin/
+obj/
+
+# User-specific
+*.user
+*.suo
+
+# IDE
+.vs/
+
+# macOS
+.DS_Store
