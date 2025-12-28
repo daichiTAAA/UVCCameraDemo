@@ -247,9 +247,9 @@ Use Caseは以下の抽象にのみ依存し、具体実装は外側に置く。
   - `Content-Disposition: attachment`
   - 取得元: ローカル優先、無ければADLS
 
-ストリーミング（推奨）
+ストリーミング（MVPで実装必須）
 - `GET /api/segments/{segmentId}/stream`
-  - HTTP Range対応（`206 Partial Content`）
+  - HTTP Range対応（`206 Partial Content`）を必須とする（シークの運用負荷低減）
   - 取得元: ローカル優先、無ければADLS
 
 #### 9.2.3 Range応答（/stream）
@@ -259,6 +259,9 @@ Use Caseは以下の抽象にのみ依存し、具体実装は外側に置く。
   - `Content-Range: bytes <start>-<end>/<total>`
   - `Content-Length: <partialLength>`
 - Range無しは `200 OK` で全体返却
+
+補足:
+- 例外的にRange応答が成立しない取得元（プロキシ/ストレージ制約等）がある場合でも、少なくともMVPではRangeを成立させる実装（サーバー側でのバッファリング等）を行う。
 
 ### 9.3 重複アップロード（再送）時の扱い
 - `segment_id` はサーバー採番（UUID）とし、Web API（`/api/segments/{segmentId}`）等の参照IDとして用いる
