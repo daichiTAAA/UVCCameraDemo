@@ -50,19 +50,19 @@ Androidアプリ（UVCCameraDemo）からLAN内サーバーへアップロード
 サーバー側で付与/保持:
 - receivedAt（サーバー受信時刻、TIMESTAMPTZ）
 
-補足:
-- segmentUuid は端末がセグメント生成時に発行する不変ID（UUID）であり、重複受信（再送）・後追い紐づけ・segmentIndex再採番が発生しても同一セグメントを一意に識別できること。
+識別子の要件（同一セグメントの識別）:
+- segmentUuid は端末がセグメント生成時に発行する不変ID（UUID）であり、重複受信（再送）・後追い紐づけ・segmentIndex 再採番が発生しても同一セグメントを一意に識別できること。
 
 ### 5.2 recordedAt の一貫性
 recordedAt は検索・表示の基準となるため、Android→サーバー→ADLS→Web UI で同一の表現・タイムゾーンで扱えること。
 
-補足:
+端末時刻ズレ対策（保持期限・監視）:
 - 端末時刻ズレの影響を吸収するため、保持期限・監視用途は receivedAt（サーバー時刻）を優先できること。
 
 ### 5.3 segmentIndex の解釈
 segmentIndex は同一workId内の順序を表す値として扱えること。
 
-補足:
+再採番の要件:
 - segmentIndex は後追い紐づけ等により再採番され得るため、「同一セグメント」の識別は segmentUuid を正とする。
 
 ## 6. 機能要件
@@ -112,7 +112,7 @@ segmentIndex は同一workId内の順序を表す値として扱えること。
 - ローカル（サーバー）に保存された動画は、原則としてreceivedAt（サーバー受信時刻）から7日を超えたものを削除できる（自動）
 	- 削除後も、WebアプリからはADLS上の動画を参照して再生/ダウンロードできること
 
-補足:
+保持期限の基準:
 - recordedAt の表現統一（TIMESTAMPTZ + ISO 8601）方針は維持しつつ、端末時刻ズレ対策として保持期限や監視は receivedAt 優先へ切替できる。
 
 ### 6.9 工程マスタ提供（Android向け）
