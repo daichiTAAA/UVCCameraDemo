@@ -4,7 +4,6 @@ import android.Manifest
 import android.app.Activity
 import android.content.Context
 import android.content.pm.PackageManager
-import android.graphics.SurfaceTexture
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import android.net.Uri
@@ -13,7 +12,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
-import android.view.TextureView
+import android.view.SurfaceHolder
 import android.widget.MediaController
 import android.widget.VideoView
 import androidx.activity.ComponentActivity
@@ -100,7 +99,7 @@ import com.jiangdg.ausbc.callback.IPreviewDataCallBack
 import com.jiangdg.ausbc.camera.CameraUvcStrategy
 import com.jiangdg.ausbc.camera.bean.CameraRequest
 import com.jiangdg.ausbc.render.env.RotateType
-import com.jiangdg.ausbc.widget.AspectRatioTextureView
+import com.jiangdg.ausbc.widget.AspectRatioSurfaceView
 import com.serenegiant.usb.USBMonitor
 import java.io.File
 import java.text.SimpleDateFormat
@@ -188,7 +187,7 @@ private fun UvcPreviewScreen(
         if (isPreview) {
             null
         } else {
-            AspectRatioTextureView(context)
+            AspectRatioSurfaceView(context)
         }
     }
     val cameraRequest = remember {
@@ -233,7 +232,11 @@ private fun UvcPreviewScreen(
     var recordingElapsedMs by remember { mutableStateOf(0L) }
     var pendingOpen by remember { mutableStateOf(false) }
     var pendingRecord by remember { mutableStateOf(false) }
-    var isStrategyActive by remember { mutableStateOf(false) }
+    var isStrategyActive by remember(lifecycleOwner) {
+        mutableStateOf(
+            lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
+        )
+    }
     var isOpening by remember { mutableStateOf(false) }
     val openRequestIssued = remember { AtomicBoolean(false) }
     var hasIssuedSwitchRequest by remember { mutableStateOf(false) }
@@ -347,14 +350,11 @@ private fun UvcPreviewScreen(
         if (isResolutionSwitchWindowActive()) {
             return
         }
-        val hasUsbPermission = usbManager.hasPermission(device)
-        val currentDeviceId = cameraStrategy?.getCurrentDevice()?.deviceId?.toString()
-        val needsSwitch = currentDeviceId != targetId || !hasUsbPermission
-        if (needsSwitch && !hasIssuedSwitchRequest) {
+        if (!hasIssuedSwitchRequest) {
             cameraClient?.switchCamera(targetId)
             hasIssuedSwitchRequest = true
         }
-        if (hasUsbPermission) {
+        if (usbManager.hasPermission(device)) {
             return
         }
         if (hasRequestedUsbPermission) {
@@ -377,15 +377,15 @@ private fun UvcPreviewScreen(
         val targetId = selectedDeviceId ?: return
         val view = cameraView ?: return
         val device = deviceById[targetId] ?: return
+        if (!usbManager.hasPermission(device)) {
+            requestUsbPermissionIfNeeded()
+            return
+        }
         if (!openRequestIssued.compareAndSet(false, true)) {
             return
         }
         cameraRequest.cameraId = targetId
         cameraClient?.openCamera(view, false)
-        requestUsbPermissionIfNeeded()
-        if (!usbManager.hasPermission(device)) {
-            return
-        }
     }
 
     fun cancelPendingReopen() {
@@ -629,26 +629,42 @@ private fun UvcPreviewScreen(
         cameraRequest.previewHeight = option.height
         selectedResolution = option
         if (isPreviewViewReady) {
-            cameraView?.surfaceTexture?.setDefaultBufferSize(option.width, option.height)
+            cameraView?.holder?.setFixedSize(option.width, option.height)
             cameraView?.setAspectRatio(option.width, option.height)
         }
         val clientOpened = cameraClient?.isCameraOpened() == true
         if (clientOpened) {
-            val updated = cameraClient.updateResolution(option.width, option.height)
+            isResolutionSwitching = true
+            lastResolutionSwitchAt = SystemClock.elapsedRealtime()
+            val updated = run {
+                val strategy = cameraStrategy ?: return@run false
+                try {
+                    val method = strategy.javaClass.getDeclaredMethod(
+                        "updateResolutionInternal",
+                        Int::class.javaPrimitiveType,
+                        Int::class.javaPrimitiveType
+                    )
+                    method.isAccessible = true
+                    method.invoke(strategy, option.width, option.height)
+                    true
+                } catch (error: Exception) {
+                    Log.e(TAG, "updateResolutionInternal failed", error)
+                    false
+                }
+            }
             if (!updated) {
                 statusMessage = context.getString(
                     R.string.status_resolution_not_supported,
                     resolutionLabel
                 )
+                isResolutionSwitching = false
                 return
             }
             statusMessage = context.getString(R.string.status_camera_opening)
-            isResolutionSwitching = true
-            lastResolutionSwitchAt = SystemClock.elapsedRealtime()
             hasIssuedSwitchRequest = false
             openRequestIssued.set(false)
             isCameraOpened = false
-            isOpening = true
+            isOpening = false
             previewFrameLogged.set(false)
             scheduleResolutionRecovery()
         } else {
@@ -665,33 +681,31 @@ private fun UvcPreviewScreen(
     if (!isPreview && cameraClient != null && cameraStrategy != null) {
         DisposableEffect(cameraView) {
             val previewView = cameraView ?: return@DisposableEffect onDispose { }
-            val callback = object : TextureView.SurfaceTextureListener {
-                override fun onSurfaceTextureAvailable(
-                    surface: SurfaceTexture,
-                    width: Int,
-                    height: Int
-                ) {
+            val holder = previewView.holder
+            val callback = object : SurfaceHolder.Callback {
+                override fun surfaceCreated(holder: SurfaceHolder) {
                     isPreviewViewReady = true
-                    surface.setDefaultBufferSize(
+                    holder.setFixedSize(
                         cameraRequest.previewWidth,
                         cameraRequest.previewHeight
                     )
-                    Log.d(TAG, "surfaceTextureAvailable w=$width h=$height")
+                    Log.d(TAG, "surfaceCreated")
                     handleAutoOpen()
                     attemptOpenIfReady()
                 }
 
-                override fun onSurfaceTextureSizeChanged(
-                    surface: SurfaceTexture,
+                override fun surfaceChanged(
+                    holder: SurfaceHolder,
+                    format: Int,
                     width: Int,
                     height: Int
                 ) {
-                    Log.d(TAG, "surfaceTextureSizeChanged w=$width h=$height")
+                    Log.d(TAG, "surfaceChanged w=$width h=$height")
                     cameraClient?.setRenderSize(width, height)
                 }
 
-                override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
-                    Log.d(TAG, "surfaceTextureDestroyed")
+                override fun surfaceDestroyed(holder: SurfaceHolder) {
+                    Log.d(TAG, "surfaceDestroyed")
                     isPreviewViewReady = false
                     isOpening = false
                     isCameraOpened = false
@@ -702,19 +716,16 @@ private fun UvcPreviewScreen(
                     isResolutionSwitching = false
                     stopRecording()
                     cameraClient?.closeCamera()
-                    return false
                 }
-
-                override fun onSurfaceTextureUpdated(surface: SurfaceTexture) = Unit
             }
-            previewView.surfaceTextureListener = callback
-            isPreviewViewReady = previewView.isAvailable
+            holder.addCallback(callback)
+            isPreviewViewReady = holder.surface.isValid
             if (isPreviewViewReady) {
                 handleAutoOpen()
                 attemptOpenIfReady()
             }
             onDispose {
-                previewView.surfaceTextureListener = null
+                holder.removeCallback(callback)
                 isPreviewViewReady = false
                 cancelPendingReopen()
                 cancelResolutionRecovery()
@@ -726,8 +737,10 @@ private fun UvcPreviewScreen(
             val observer = LifecycleEventObserver { _, event ->
                 when (event) {
                     Lifecycle.Event.ON_START -> {
-                        cameraStrategy.register()
-                        isStrategyActive = true
+                        if (!isStrategyActive) {
+                            cameraStrategy.register()
+                            isStrategyActive = true
+                        }
                     }
                     Lifecycle.Event.ON_STOP -> {
                         isStrategyActive = false
@@ -755,6 +768,12 @@ private fun UvcPreviewScreen(
                 }
             }
             lifecycleOwner.lifecycle.addObserver(observer)
+            if (!isStrategyActive &&
+                lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
+            ) {
+                cameraStrategy.register()
+                isStrategyActive = true
+            }
             onDispose {
                 isStrategyActive = false
                 isOpening = false
@@ -834,6 +853,10 @@ private fun UvcPreviewScreen(
                         R.string.status_device_in_use,
                         device.deviceName
                     )
+                    if (!isOpening) {
+                        isOpening = true
+                        openRequestIssued.set(false)
+                    }
                     attemptOpenIfReady()
                     if (isPreviewViewReady && cameraClient.isCameraOpened() == true) {
                         isCameraOpened = true
@@ -990,16 +1013,15 @@ private fun UvcPreviewScreen(
         }
     }
 
-        LaunchedEffect(selectedDeviceId, selectedResolution) {
-            val targetId = selectedDeviceId
-            if (targetId != null) {
-                cameraRequest.cameraId = targetId
-                hasRequestedUsbPermission = false
-            }
-            if (!isResolutionSwitchWindowActive()) {
-                handleAutoOpen()
-            }
+    LaunchedEffect(selectedDeviceId, selectedResolution) {
+        val targetId = selectedDeviceId
+        if (targetId != null) {
+            cameraRequest.cameraId = targetId
         }
+        if (!isResolutionSwitchWindowActive()) {
+            handleAutoOpen()
+        }
+    }
 
     UvcPreviewScreenContent(
         modifier = modifier,
@@ -1020,7 +1042,12 @@ private fun UvcPreviewScreen(
         onSelectDevice = { id ->
             val wasSelected = selectedDeviceId == id
             selectedDeviceId = id
-            if (wasSelected) {
+            if (!wasSelected) {
+                hasRequestedUsbPermission = false
+                hasIssuedSwitchRequest = false
+                cameraClient?.switchCamera(id)
+                hasIssuedSwitchRequest = true
+            } else {
                 handleAutoOpen()
             }
         },

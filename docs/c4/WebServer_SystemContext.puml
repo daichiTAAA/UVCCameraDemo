@@ -1,0 +1,20 @@
+@startuml WebServer_SystemContext
+!include <C4/C4_Context>
+
+title Webアプリサーバー - C4 System Context
+
+Person(androidApp, "Androidアプリ", "録画セグメント生成・tusアップロード")
+Person(browserUser, "PCブラウザ利用者", "検索/再生/ダウンロード")
+
+System(lanVideoSystem, "LAN録画サーバー", "録画セグメントの受信（tus）→検索/配信（API）→日次アーカイブ（ADLS）→ローカル7日保持")
+
+System_Ext(adls, "ADLS", "Azure Data Lake Storage（動画アーカイブ）")
+System_Ext(pg, "PostgreSQL", "メタデータDB")
+
+Rel(androidApp, lanVideoSystem, "録画セグメントをアップロード", "tus (HTTP)")
+Rel(browserUser, lanVideoSystem, "検索/再生/ダウンロード", "HTTP")
+
+Rel(lanVideoSystem, pg, "メタデータ保存/検索", "SQL")
+Rel(lanVideoSystem, adls, "日次アーカイブ/フォールバック配信", "HTTPS")
+
+@enduml

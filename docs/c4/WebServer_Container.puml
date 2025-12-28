@@ -1,0 +1,33 @@
+@startuml WebServer_Container
+!include <C4/C4_Container>
+
+title Webアプリサーバー - C4 Container
+
+Person(androidApp, "Androidアプリ", "録画セグメント生成・tusアップロード")
+Person(browserUser, "PCブラウザ利用者", "検索/再生/ダウンロード")
+
+System_Ext(adls, "ADLS", "Azure Data Lake Storage（動画アーカイブ）")
+
+System_Boundary(lanSystem, "LAN録画サーバー") {
+  Container(tusd, "tusd", "tus", "再開可能アップロード受信（/files/）。完了時にフック通知")
+  Container(web, "Webサーバー", "ASP.NET", "UI静的配信 + Web API（検索/詳細/stream/download、tusd hook受信）")
+  ContainerDb(pg, "PostgreSQL", "PostgreSQL", "works/segments メタデータDB")
+  Container(localFs, "ローカルストレージ", "File System", "受信済み動画を保存（recordedAt基準で原則7日保持）")
+  Container(job, "日次ジョブ", "Scheduler/Worker", "ADLSアーカイブ + ローカル7日削除（冪等）")
+}
+
+Rel(androidApp, tusd, "録画セグメントをアップロード", "tus (HTTP)")
+Rel(tusd, localFs, "アップロード完了ファイルを確定", "FS")
+Rel(tusd, web, "完了フック通知", "HTTP")
+
+Rel(browserUser, web, "検索/再生/ダウンロード", "HTTP")
+Rel(web, pg, "検索/詳細/登録・更新", "SQL")
+
+Rel(web, localFs, "動画取得（ローカル優先）", "FS")
+Rel(web, adls, "ローカル無し時フォールバック", "HTTPS")
+
+Rel(job, pg, "adlsPath/archivedAt更新", "SQL")
+Rel(job, adls, "未アーカイブ分をアップロード", "HTTPS")
+Rel(job, localFs, "7日超削除", "FS")
+
+@enduml

@@ -1,0 +1,65 @@
+@startuml WebServer_Component
+!include <C4/C4_Component>
+
+title Webサーバー（ASP.NET）- C4 Component（クリーンアーキテクチャ）
+
+Person(browserUser, "PCブラウザ利用者", "検索/再生/ダウンロード")
+Person(androidApp, "Androidアプリ", "tusアップロード（tusdへ）")
+
+System_Ext(tusd, "tusd", "tus受信・完了フック")
+System_Ext(pg, "PostgreSQL", "メタデータDB")
+System_Ext(adls, "ADLS", "動画アーカイブ")
+System_Ext(localFs, "ローカルストレージ", "動画保存")
+System_Ext(scheduler, "Scheduler", "日次ジョブ起動")
+System_Ext(systemClock, "System Clock", "現在時刻")
+
+Container_Boundary(web, "Webサーバー（ASP.NET）") {
+  ' --- Interface Adapters ---
+  Component(apiControllers, "HTTP Controllers", "ASP.NET", "API Model ⇄ Use Case Model 変換")
+  Component(hookReceiver, "tusd Hook Receiver", "ASP.NET", "tusdイベント受信・Use Case呼び出し")
+  Component(jobTrigger, "Job Trigger Adapter", "Hosted Service", "日次アーカイブ/削除のトリガ")
+
+  ' --- Application / Use Cases ---
+  Component(workQueryPort, "WorkQueryPort", "Inbound Port", "工程マスタ/作業検索/作業詳細")
+  Component(segmentDeliveryPort, "SegmentDeliveryPort", "Inbound Port", "download/stream（Range含む）")
+  Component(ingestionPort, "IngestionAndMaintenancePort", "Inbound Port", "アップロード完了/日次アーカイブ/保持期限削除")
+
+  Component(interactors, "Interactors", "Use Cases", "検索/詳細/配信/取り込み/保守の中核")
+
+  ' --- Outbound Ports + Adapters ---
+  Component(workStorePort, "WorkStorePort", "Outbound Port", "works/segments の取得/検索/Upsert")
+  Component(videoStoragePort, "VideoStoragePort", "Outbound Port", "local-first + ADLS fallback")
+  Component(clockPort, "ClockPort", "Outbound Port", "現在時刻")
+
+  Component(pgRepo, "PostgreSQL Repository Adapter", "Npgsql", "WorkStorePort 実装")
+  Component(videoStorage, "Video Storage Adapter", "FS + ADLS SDK", "VideoStoragePort 実装")
+  Component(clockAdapter, "System Clock Adapter", ".NET", "ClockPort 実装")
+}
+
+Rel(browserUser, apiControllers, "API呼び出し", "HTTP")
+Rel(tusd, hookReceiver, "アップロード完了フック", "HTTP")
+Rel(scheduler, jobTrigger, "日次起動", "Process")
+
+Rel(apiControllers, workQueryPort, "呼び出し")
+Rel(apiControllers, segmentDeliveryPort, "呼び出し")
+Rel(hookReceiver, ingestionPort, "呼び出し")
+Rel(jobTrigger, ingestionPort, "呼び出し")
+
+Rel(workQueryPort, interactors, "委譲")
+Rel(segmentDeliveryPort, interactors, "委譲")
+Rel(ingestionPort, interactors, "委譲")
+
+Rel(interactors, workStorePort, "永続化/検索")
+Rel(interactors, videoStoragePort, "動画保存/取得")
+Rel(interactors, clockPort, "時刻取得")
+
+Rel(workStorePort, pgRepo, "実装")
+Rel(videoStoragePort, videoStorage, "実装")
+Rel(clockPort, clockAdapter, "実装")
+
+Rel(pgRepo, pg, "SQL")
+Rel(videoStorage, localFs, "ローカル読み書き")
+Rel(videoStorage, adls, "アップロード/取得", "HTTPS")
+Rel(clockAdapter, systemClock, "Now")
+
+@enduml
