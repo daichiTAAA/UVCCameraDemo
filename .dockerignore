@@ -1,0 +1,12 @@
+.git
+.gitignore
+**/bin/
+**/obj/
+**/node_modules/
+**/.idea/
+**/.vscode/
+**/.gradle/
+**/build/
+*.iml
+.tmp
+tmp

@@ -16,3 +16,6 @@
 local.properties
 .tmp
 tmp
+
+.env
+.kotlin

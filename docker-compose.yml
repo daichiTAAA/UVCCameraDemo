@@ -1,0 +1,79 @@
+services:
+  reverse-proxy:
+    image: nginx:stable
+    container_name: uvccamera-nginx
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./compose/nginx.conf:/etc/nginx/nginx.conf:ro
+    environment:
+      TUSD_UPLOAD_API_KEY: ${TUSD_UPLOAD_API_KEY:-}
+    depends_on:
+      - webapp
+      - tusd
+    networks:
+      - appnet
+
+  webapp:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    container_name: uvccamera-webapp
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__Main: Host=postgres;Port=5432;Database=uvc;Username=${POSTGRES_USER:-uvc};Password=${POSTGRES_PASSWORD:-uvc}
+      Storage__LocalRoot: /data/videos
+      Storage__IncomingSubdirectory: incoming
+      Storage__MetadataPath: /data/metadata.json
+      Security__ApiKey: ${API_KEY:-}
+      Security__TusdHookApiKey: ${TUSD_HOOK_API_KEY:-}
+      Maintenance__RetentionDays: 7
+      Maintenance__AllowDeleteUnarchived: "false"
+      Maintenance__BackgroundIntervalMinutes: 60
+      StaticFiles__RootPath: /app/wwwroot
+    volumes:
+      - videos:/data/videos
+    depends_on:
+      - postgres
+    networks:
+      - appnet
+
+  tusd:
+    image: tusproject/tusd:v1.12.0
+    container_name: uvccamera-tusd
+    user: "0:0"
+    command:
+      - "-upload-dir=/data/videos/incoming"
+      - "-base-path=/files/"
+      - "-hooks-http=http://webapp:8080/api/tusd/hooks/completed"
+      - "-max-size=1073741824"
+    volumes:
+      - videos:/data/videos
+    depends_on:
+      - webapp
+    networks:
+      - appnet
+
+  postgres:
+    image: postgres:16
+    container_name: uvccamera-postgres
+    environment:
+      POSTGRES_DB: uvc
+      POSTGRES_USER: ${POSTGRES_USER:-uvc}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-uvc}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - appnet
+
+networks:
+  appnet:
+
+volumes:
+  videos:
+  pgdata:

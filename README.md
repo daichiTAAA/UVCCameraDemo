@@ -14,3 +14,8 @@
 	- `POST /api/tusd/hooks/completed` tusdフック（メタデータ復元対応）
 	- `POST /api/jobs/cleanup` ローカル保持期限削除（バックグラウンド実行あり）
 	- `POST /api/jobs/archive` ADLSアーカイブ（現状スタブ）
+
+### Docker Compose で起動
+- `.env.example` を `.env` にコピーして API キーや DB パスワードを設定
+- `docker compose up -d --build`
+- 入口: http://localhost:8080/ （/api, /files, UI を同一オリジンで提供。nginx 設定は `compose/nginx.conf`）
