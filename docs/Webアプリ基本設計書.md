@@ -24,7 +24,7 @@ Androidアプリ（UVCCameraDemo）からLAN内サーバーへアップロード
 - tusサーバー（tusd想定）: Androidからのアップロード受信
 - Webアプリ
   - UI: React + Vite
-  - Web API: 検索/詳細/動画配信（ストリーム/ダウンロード）
+  - Web API: 検索/詳細/動画配信（ストリーム/ダウンロード）、Android向け工程マスタ提供
 - メタデータDB: SQLite（単一サーバー・LAN内運用を前提に軽量構成）
 - ローカルストレージ: 受信済み動画（7日保持）
 - 日次ジョブ: ADLSアップロード + ローカル7日削除
@@ -174,6 +174,24 @@ flowchart LR
   - 例: `{"error":"NOT_FOUND","message":"..."}`
 
 ### 8.2 エンドポイント（最小）
+#### 8.2.0 工程マスタ（Android向け）
+- `GET /api/processes`
+	- 目的: Androidアプリが工程候補（工程マスタ）を取得し、ユーザー選択に利用する
+	- response: 工程候補一覧
+
+レスポンス例（概念）:
+```json
+{
+  "items": [
+    {"id": "P01", "name": "組立"},
+    {"id": "P02", "name": "検査"}
+  ]
+}
+```
+
+補足:
+- Android側は `id` を保存・復元に利用し、表示は `name` を使用する（保存済み `id` が候補から外れた場合は未選択へ戻す）
+
 #### 8.2.1 作業一覧検索
 - `GET /api/works`
   - query: `workId`, `model`, `serial`, `process`, `from`, `to`
