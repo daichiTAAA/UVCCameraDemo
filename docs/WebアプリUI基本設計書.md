@@ -36,7 +36,6 @@ flowchart LR
 
 ### 4.3 一覧/検索画面
 **入力項目（最小）**
-- 作業ID（完全一致）
 - 型式（model、部分一致可）
 - 機番（serial、部分一致可）
 - 工程（process、部分一致可）
@@ -93,7 +92,7 @@ flowchart LR
 ### 5.2 エンドポイント（最小）
 - `GET /api/processes`
   - Android向け工程候補。UIは基本的に直接利用しない（将来の検索入力補助に使う可能性はある）
-- `GET /api/works?workId&model&serial&process&from&to`
+- `GET /api/works?model&serial&process&from&to`
 - `GET /api/works/{workId}`
 - `GET /api/segments/{segmentId}/stream`
 - `GET /api/segments/{segmentId}/download`
