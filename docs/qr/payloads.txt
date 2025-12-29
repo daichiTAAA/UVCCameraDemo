@@ -1,0 +1,6 @@
+qr_kv_model_serial_MODEL-01_SN-0001.png	model=MODEL-01 / serial=SN-0001
+qr_kv_type_sn_MODEL-01_SN-0001.png	type:MODEL-01;sn:SN-0001
+qr_tokens_csv_MODEL-01_SN-0001.png	MODEL-01,SN-0001
+qr_tokens_space_MODEL-01_SN-0001.png	MODEL-01 SN-0001
+qr_kv_short_m_s_M01_S0001.png	m=M01&s=S0001
+qr_realistic_kv_MODEL-X200_SN-20251229-0007.png	model=MODEL-X200 / serial=SN-20251229-0007
