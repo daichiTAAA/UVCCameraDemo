@@ -10,6 +10,11 @@ android {
         version = release(36)
     }
 
+    val uvcPreviewWidth =
+        (project.findProperty("uvcPreviewWidth") as String?)?.toIntOrNull() ?: 1920
+    val uvcPreviewHeight =
+        (project.findProperty("uvcPreviewHeight") as String?)?.toIntOrNull() ?: 1080
+
     defaultConfig {
         applicationId = "com.example.uvccamerademo"
         minSdk = 24
@@ -18,6 +23,8 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        buildConfigField("int", "DEFAULT_PREVIEW_WIDTH", uvcPreviewWidth.toString())
+        buildConfigField("int", "DEFAULT_PREVIEW_HEIGHT", uvcPreviewHeight.toString())
     }
 
     buildTypes {
@@ -38,6 +45,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 

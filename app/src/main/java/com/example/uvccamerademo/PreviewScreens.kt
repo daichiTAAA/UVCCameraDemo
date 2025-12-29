@@ -14,14 +14,10 @@ import com.example.uvccamerademo.ui.theme.UVCCameraDemoTheme
 @Preview(showBackground = true)
 @Composable
 fun UvcPreviewScreenPreview() {
-    val resolutionOptions = listOf(
-        ResolutionOption(640, 480),
-        ResolutionOption(1280, 720),
-        ResolutionOption(1920, 1080)
+    val selectedResolution = ResolutionOption(
+        width = BuildConfig.DEFAULT_PREVIEW_WIDTH,
+        height = BuildConfig.DEFAULT_PREVIEW_HEIGHT
     )
-    val selectedResolution =
-        resolutionOptions.firstOrNull { it.width == 1920 && it.height == 1080 }
-            ?: resolutionOptions.first()
     val devices = listOf(
         UvcDeviceInfo(
             id = "1001",
@@ -45,13 +41,11 @@ fun UvcPreviewScreenPreview() {
             isFinalizing = false,
             recordingElapsedMs = 65_000L,
             selectedDeviceId = devices.first().id,
-            resolutionOptions = resolutionOptions,
             selectedResolution = selectedResolution,
             deviceList = devices,
             onOpen = {},
             onClose = {},
             onToggleRecord = {},
-            onApplyResolution = {},
             onRefreshDevices = {},
             onOpenRecordings = {},
             onSelectDevice = {},

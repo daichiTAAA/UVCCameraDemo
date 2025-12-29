@@ -21,7 +21,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
@@ -31,7 +30,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -40,8 +38,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -175,10 +171,16 @@ private fun UvcPreviewScreen(
             AspectRatioTextureView(context)
         }
     }
+    val selectedResolution = remember {
+        ResolutionOption(
+            width = BuildConfig.DEFAULT_PREVIEW_WIDTH,
+            height = BuildConfig.DEFAULT_PREVIEW_HEIGHT
+        )
+    }
     val cameraRequest = remember {
         CameraRequest.Builder()
-            .setPreviewWidth(1920)
-            .setPreviewHeight(1080)
+            .setPreviewWidth(selectedResolution.width)
+            .setPreviewHeight(selectedResolution.height)
             .create()
     }
     val cameraStrategy = remember {
@@ -216,17 +218,6 @@ private fun UvcPreviewScreen(
     var pendingRecord by remember { mutableStateOf(false) }
     var recorder by remember { mutableStateOf<HevcRecorder?>(null) }
 
-    val resolutionOptions = remember {
-        listOf(
-            ResolutionOption(640, 480),
-            ResolutionOption(1280, 720),
-            ResolutionOption(1920, 1080)
-        )
-    }
-    val defaultResolution =
-        resolutionOptions.firstOrNull { it.width == 1920 && it.height == 1080 }
-            ?: resolutionOptions.first()
-    var selectedResolution by remember { mutableStateOf(defaultResolution) }
     val previewRotation = 0f
     val previewAspectRatio =
         selectedResolution.width.toFloat() / selectedResolution.height.toFloat()
@@ -266,33 +257,6 @@ private fun UvcPreviewScreen(
             if (selectedDeviceId == null || mapped.none { it.id == selectedDeviceId }) {
                 selectedDeviceId = mapped.first().id
             }
-        }
-    }
-
-    val applyResolution = { option: ResolutionOption ->
-        val resolutionLabel = context.getString(
-            R.string.format_resolution,
-            option.width,
-            option.height
-        )
-        val updated = if (isCameraOpened && cameraClient != null) {
-            cameraClient.updateResolution(option.width, option.height)
-        } else {
-            true
-        }
-        if (!updated) {
-            statusMessage = context.getString(
-                R.string.status_resolution_not_supported,
-                resolutionLabel
-            )
-        } else {
-            cameraRequest.previewWidth = option.width
-            cameraRequest.previewHeight = option.height
-            selectedResolution = option
-            statusMessage = context.getString(
-                R.string.status_resolution_set,
-                resolutionLabel
-            )
         }
     }
 
@@ -613,13 +577,11 @@ private fun UvcPreviewScreen(
         isFinalizing = isFinalizing,
         recordingElapsedMs = recordingElapsedMs,
         selectedDeviceId = selectedDeviceId,
-        resolutionOptions = resolutionOptions,
         selectedResolution = selectedResolution,
         deviceList = deviceList,
         onOpen = { handleOpen() },
         onClose = { handleClose() },
         onToggleRecord = { handleToggleRecord() },
-        onApplyResolution = { option -> applyResolution(option) },
         onRefreshDevices = { refreshDevices() },
         onOpenRecordings = onOpenRecordings,
         onSelectDevice = { selectedDeviceId = it },
@@ -637,13 +599,11 @@ internal fun UvcPreviewScreenContent(
     isFinalizing: Boolean,
     recordingElapsedMs: Long,
     selectedDeviceId: String?,
-    resolutionOptions: List<ResolutionOption>,
     selectedResolution: ResolutionOption,
     deviceList: List<UvcDeviceInfo>,
     onOpen: () -> Unit,
     onClose: () -> Unit,
     onToggleRecord: () -> Unit,
-    onApplyResolution: (ResolutionOption) -> Unit,
     onRefreshDevices: () -> Unit,
     onOpenRecordings: () -> Unit,
     onSelectDevice: (String) -> Unit,
@@ -814,43 +774,6 @@ internal fun UvcPreviewScreenContent(
                         onClick = onOpenRecordings
                     ) {
                         Text(stringResource(R.string.label_recordings))
-                    }
-                }
-            }
-
-            Card(
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-            ) {
-                Column(
-                    modifier = Modifier.padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Text(
-                        text = stringResource(R.string.label_resolution),
-                        style = MaterialTheme.typography.titleMedium
-                    )
-                    LazyRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        contentPadding = PaddingValues(horizontal = 2.dp)
-                    ) {
-                        items(resolutionOptions, key = { it.width to it.height }) { option ->
-                            val optionLabel = stringResource(
-                                R.string.format_resolution,
-                                option.width,
-                                option.height
-                            )
-                            FilterChip(
-                                selected = option == selectedResolution,
-                                onClick = { onApplyResolution(option) },
-                                label = { Text(optionLabel) },
-                                enabled = !isRecording && !isFinalizing,
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                                    selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
-                                )
-                            )
-                        }
                     }
                 }
             }
