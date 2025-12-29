@@ -9,16 +9,25 @@ services:
     environment:
       TUSD_UPLOAD_API_KEY: ${TUSD_UPLOAD_API_KEY:-}
     depends_on:
-      - webapp
+      - webui
+      - webserver
       - tusd
     networks:
       - appnet
 
-  webapp:
+  webui:
     build:
-      context: .
-      dockerfile: server/Dockerfile
-    container_name: uvccamera-webapp
+      context: ./webui
+      dockerfile: Dockerfile
+    container_name: uvccamera-webui
+    networks:
+      - appnet
+
+  webserver:
+    build:
+      context: ./webserver
+      dockerfile: Dockerfile
+    container_name: uvccamera-webserver
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       ConnectionStrings__Main: Host=postgres;Port=5432;Database=uvc;Username=${POSTGRES_USER:-uvc};Password=${POSTGRES_PASSWORD:-uvc}
@@ -30,7 +39,6 @@ services:
       Maintenance__RetentionDays: 7
       Maintenance__AllowDeleteUnarchived: "false"
       Maintenance__BackgroundIntervalMinutes: 60
-      StaticFiles__RootPath: /app/wwwroot
     volumes:
       - videos:/data/videos
     depends_on:
@@ -45,12 +53,12 @@ services:
     command:
       - "-upload-dir=/data/videos/incoming"
       - "-base-path=/files/"
-      - "-hooks-http=http://webapp:8080/api/tusd/hooks/completed"
+      - "-hooks-http=http://webserver:8080/api/tusd/hooks/completed"
       - "-max-size=1073741824"
     volumes:
       - videos:/data/videos
     depends_on:
-      - webapp
+      - webserver
     networks:
       - appnet
 

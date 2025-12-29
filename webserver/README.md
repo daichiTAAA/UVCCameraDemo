@@ -18,7 +18,7 @@
 - `Storage`: `LocalRoot`(動画ルート), `IncomingSubdirectory`, `MetadataPath`
 - `Security`: `ApiKey`（全API）/`TusdHookApiKey`（tusdフック専用）
 - `Maintenance`: `RetentionDays`, `AllowDeleteUnarchived`, `BackgroundIntervalMinutes`
-- `StaticFiles.RootPath`: ビルド済み UI を同一オリジン配信するルート（例: `../web/dist` または `/app/wwwroot`）
+- `StaticFiles.RootPath`: ビルド済み UI を同一オリジン配信するルート（例: `../webui/dist` または `/app/wwwroot`）
 
 ## 主なエンドポイント
 - `GET /api/health`

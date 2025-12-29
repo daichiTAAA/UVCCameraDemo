@@ -22,4 +22,4 @@ npm run dev
 ```bash
 npm run build
 ```
-生成物は `web/dist` に出力されます。
+生成物は `webui/dist` に出力されます。
