@@ -15,14 +15,16 @@ public interface IWorkStorePort
     Task RemoveSegmentsAsync(IEnumerable<Guid> segmentIds, CancellationToken ct);
 }
 
-public sealed record WorkSummaryProjection(
-    string WorkId,
-    string Model,
-    string Serial,
-    string Process,
-    DateTimeOffset FirstRecordedAt,
-    DateTimeOffset LastRecordedAt,
-    int SegmentCount);
+public sealed class WorkSummaryProjection
+{
+    public string WorkId { get; set; } = string.Empty;
+    public string Model { get; set; } = string.Empty;
+    public string Serial { get; set; } = string.Empty;
+    public string Process { get; set; } = string.Empty;
+    public DateTime FirstRecordedAt { get; set; }
+    public DateTime LastRecordedAt { get; set; }
+    public int SegmentCount { get; set; }
+}
 
 public interface IVideoStoragePort
 {

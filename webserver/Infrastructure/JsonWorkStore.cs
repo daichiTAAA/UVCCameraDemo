@@ -145,7 +145,16 @@ public sealed class JsonWorkStore : IWorkStorePort
                     var ordered = g.OrderBy(s => s.RecordedAt).ThenBy(s => s.SegmentIndex).ToArray();
                     var first = ordered.First();
                     var last = ordered.Last();
-                    return new WorkSummaryProjection(first.WorkId, first.Model, first.Serial, first.Process, first.RecordedAt, last.RecordedAt, ordered.Length);
+                    return new WorkSummaryProjection
+                    {
+                        WorkId = first.WorkId,
+                        Model = first.Model,
+                        Serial = first.Serial,
+                        Process = first.Process,
+                        FirstRecordedAt = first.RecordedAt.UtcDateTime,
+                        LastRecordedAt = last.RecordedAt.UtcDateTime,
+                        SegmentCount = ordered.Length
+                    };
                 })
                 .ToArray();
         }

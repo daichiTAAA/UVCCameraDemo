@@ -20,7 +20,14 @@ public sealed class WorkQueryService(IWorkStorePort store) : IWorkQueryPort
         var projections = await store.SearchWorksAsync(query, ct);
         return projections
             .OrderByDescending(p => p.LastRecordedAt)
-            .Select(p => new WorkSummary(p.WorkId, p.Model, p.Serial, p.Process, p.FirstRecordedAt, p.LastRecordedAt, p.SegmentCount))
+            .Select(p => new WorkSummary(
+                p.WorkId,
+                p.Model,
+                p.Serial,
+                p.Process,
+                ToUtcOffset(p.FirstRecordedAt),
+                ToUtcOffset(p.LastRecordedAt),
+                p.SegmentCount))
             .ToArray();
     }
 
@@ -39,5 +46,15 @@ public sealed class WorkQueryService(IWorkStorePort store) : IWorkQueryPort
             .ToArray();
 
         return new WorkDetail(first.WorkId, first.Model, first.Serial, first.Process, first.RecordedAt, last.RecordedAt, segmentViews);
+    }
+
+    private static DateTimeOffset ToUtcOffset(DateTime value)
+    {
+        return value.Kind switch
+        {
+            DateTimeKind.Utc => new DateTimeOffset(value, TimeSpan.Zero),
+            DateTimeKind.Local => value.ToUniversalTime(),
+            _ => new DateTimeOffset(DateTime.SpecifyKind(value, DateTimeKind.Utc), TimeSpan.Zero)
+        };
     }
 }

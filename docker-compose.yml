@@ -5,9 +5,10 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - ./compose/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./compose/default.conf.template:/etc/nginx/templates/default.conf.template:ro
     environment:
       TUSD_UPLOAD_API_KEY: ${TUSD_UPLOAD_API_KEY:-}
+      API_KEY: ${API_KEY:-}
     depends_on:
       - webui
       - webserver

@@ -1,0 +1,71 @@
+# Reverse proxy for UI + API + tusd (single origin)
+
+# Allow list for uploads (private networks + localhost)
+geo $allow_upload {
+    default 0;
+    127.0.0.1 1;
+    ::1 1;
+    10.0.0.0/8 1;
+    172.16.0.0/12 1;
+    192.168.0.0/16 1;
+    fc00::/7 1;
+}
+
+# Verify upload API key (X-Api-Key) for /files/*
+map $http_x_api_key $upload_api_ok {
+    default 0;
+    "${TUSD_UPLOAD_API_KEY}" 1;
+}
+
+limit_req_zone $binary_remote_addr zone=tus_ratelimit:10m rate=5r/s;
+limit_conn_zone $binary_remote_addr zone=tus_conn:10m;
+
+upstream webserver {
+    server webserver:8080;
+}
+
+upstream webui {
+    server webui:80;
+}
+
+upstream tusd {
+    server tusd:1080;
+}
+
+server {
+    listen 8080;
+    server_name _;
+
+    client_max_body_size 1024m;
+
+    # API -> webserver (inject server-side API key)
+    location /api/ {
+        proxy_pass http://webserver;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Api-Key "${API_KEY}";
+    }
+
+    # tus uploads -> tusd
+    location /files/ {
+        if ($upload_api_ok = 0) { return 401; }
+        if ($allow_upload = 0) { return 403; }
+
+        limit_req zone=tus_ratelimit burst=10 nodelay;
+        limit_conn tus_conn 20;
+
+        proxy_pass http://tusd;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+
+    # UI (SPA)
+    location / {
+        proxy_pass http://webui;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+}
