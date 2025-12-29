@@ -11,7 +11,7 @@ export function Layout({ children }: LayoutProps) {
       <header className="app-header">
         <div className="app-header-inner">
           <Link to="/" className="brand">
-            作業映像ポータル
+            作業動画ポータル
           </Link>
           <nav className="nav-links">
             <NavLink
