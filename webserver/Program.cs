@@ -12,6 +12,9 @@ using WebServer.Infrastructure;
 
 var builder = WebApplication.CreateBuilder(args);
 
+var openApiExportMode = builder.Configuration.GetValue<bool>("OPENAPI_EXPORT")
+    || builder.Configuration.GetValue<bool>("OpenApi:Export");
+
 // Ensure snake_case DB columns map to PascalCase properties (e.g. segment_id -> SegmentId).
 DefaultTypeMap.MatchNamesWithUnderscores = true;
 
@@ -28,25 +31,38 @@ builder.Services.AddSingleton<IClockPort, SystemClock>();
 builder.Services.AddSingleton<IMetadataStorePort>(sp =>
 {
     var configuration = sp.GetRequiredService<IConfiguration>();
+
+    if (openApiExportMode)
+    {
+        var storage = sp.GetRequiredService<IOptions<StorageOptions>>().Value;
+        var jsonStore = new JsonMetadataStore(storage.MetadataPath);
+        jsonStore.InitializeAsync(CancellationToken.None).GetAwaiter().GetResult();
+        return jsonStore;
+    }
+
     var connectionString = configuration.GetConnectionString("Main");
     if (string.IsNullOrWhiteSpace(connectionString))
     {
         throw new InvalidOperationException("ConnectionStrings:Main is required (PostgreSQL)");
     }
 
-    var store = new PostgresMetadataStore(
+    var postgresStore = new PostgresMetadataStore(
         connectionString,
         sp.GetRequiredService<IOptions<TestDataOptions>>().Value,
         sp.GetRequiredService<ILogger<PostgresMetadataStore>>());
-    store.InitializeAsync(CancellationToken.None).GetAwaiter().GetResult();
-    return store;
+    postgresStore.InitializeAsync(CancellationToken.None).GetAwaiter().GetResult();
+    return postgresStore;
 });
 builder.Services.AddSingleton<IVideoStoragePort>(sp => new FileSystemVideoStorage(sp.GetRequiredService<IOptions<StorageOptions>>().Value));
 builder.Services.AddSingleton<IArchiveStoragePort>(sp => new AdlsBlobStorage(sp.GetRequiredService<IOptions<AdlsOptions>>().Value, sp.GetRequiredService<ILogger<AdlsBlobStorage>>()));
 builder.Services.AddSingleton<IMetadataQueryPort, MetadataQueryService>();
 builder.Services.AddSingleton<ISegmentDeliveryPort, SegmentDeliveryService>();
 builder.Services.AddSingleton<IIngestionAndLifecyclePort, IngestionAndLifecycleService>();
-builder.Services.AddHostedService<LifecycleHostedService>();
+
+if (!openApiExportMode)
+{
+    builder.Services.AddHostedService<LifecycleHostedService>();
+}
 
 var app = builder.Build();
 

@@ -3,6 +3,7 @@
 ## Webサーバー（ASP.NET Minimal API）
 - プロジェクト: `webserver/`
 - 実行: `dotnet run --project webserver/WebServer.csproj`
+- OpenAPI生成: `bash scripts/generate_openapi_webserver.sh`（出力: `docs/openapi/webserver.swagger.json`）
 - 設定: `webserver/appsettings.json` で `ConnectionStrings.Main`（PostgreSQL必須）, `Storage`（動画保存先）, `Security`（`X-Api-Key`）, `Lifecycle`（保持日数/定期実行間隔）, `StaticFiles.RootPath`（ビルドUI配信用）を調整
 - スキーマ: `webserver/db/schema.sql`
 - 主なエンドポイント（`X-Api-Key` を設定している場合は必須）

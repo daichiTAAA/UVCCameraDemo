@@ -1,0 +1,139 @@
+{
+  "paths": {
+    "/files/": {
+      "post": {
+        "tags": ["tusd"],
+        "summary": "tusd: Create an upload",
+        "description": "Resumable upload endpoint (tus protocol). This route is served by tusd via reverse-proxy, not by the ASP.NET webserver.\n\nReverse proxy constraints (compose/nginx.conf):\n- Requires X-Api-Key matching TUSD_UPLOAD_API_KEY\n- Uploads allowed only from private networks/localhost\n\nClient flow: POST /files/ -> Location: /files/{id} -> PATCH /files/{id} until Upload-Offset == Upload-Length.",
+        "security": [{"TusdUploadApiKey": []}],
+        "parameters": [
+          {
+            "name": "Tus-Resumable",
+            "in": "header",
+            "required": true,
+            "schema": {"type": "string", "example": "1.0.0"}
+          },
+          {
+            "name": "Upload-Length",
+            "in": "header",
+            "required": true,
+            "schema": {"type": "integer", "format": "int64"}
+          },
+          {
+            "name": "Upload-Metadata",
+            "in": "header",
+            "required": false,
+            "schema": {"type": "string"}
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created. Location header contains the upload URL.",
+            "headers": {
+              "Location": {
+                "schema": {"type": "string"},
+                "description": "Upload URL (typically /files/{id})"
+              }
+            }
+          },
+          "401": {"description": "Missing/invalid X-Api-Key (reverse proxy)"},
+          "403": {"description": "Upload not allowed from this network (reverse proxy)"}
+        }
+      }
+    },
+    "/files/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {"type": "string"}
+        }
+      ],
+      "head": {
+        "tags": ["tusd"],
+        "summary": "tusd: Get upload offset",
+        "security": [{"TusdUploadApiKey": []}],
+        "parameters": [
+          {
+            "name": "Tus-Resumable",
+            "in": "header",
+            "required": true,
+            "schema": {"type": "string", "example": "1.0.0"}
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Returns current Upload-Offset",
+            "headers": {
+              "Upload-Offset": {
+                "schema": {"type": "integer", "format": "int64"}
+              }
+            }
+          },
+          "404": {"description": "Upload not found"},
+          "401": {"description": "Missing/invalid X-Api-Key (reverse proxy)"},
+          "403": {"description": "Upload not allowed from this network (reverse proxy)"}
+        }
+      },
+      "patch": {
+        "tags": ["tusd"],
+        "summary": "tusd: Upload chunk",
+        "description": "Send a chunk using tus protocol. Content-Type must be application/offset+octet-stream.",
+        "security": [{"TusdUploadApiKey": []}],
+        "parameters": [
+          {
+            "name": "Tus-Resumable",
+            "in": "header",
+            "required": true,
+            "schema": {"type": "string", "example": "1.0.0"}
+          },
+          {
+            "name": "Upload-Offset",
+            "in": "header",
+            "required": true,
+            "schema": {"type": "integer", "format": "int64"}
+          },
+          {
+            "name": "Content-Type",
+            "in": "header",
+            "required": true,
+            "schema": {"type": "string", "example": "application/offset+octet-stream"}
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/offset+octet-stream": {
+              "schema": {"type": "string", "format": "binary"}
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "No Content. Upload-Offset header indicates new offset.",
+            "headers": {
+              "Upload-Offset": {
+                "schema": {"type": "integer", "format": "int64"}
+              }
+            }
+          },
+          "409": {"description": "Offset conflict"},
+          "404": {"description": "Upload not found"},
+          "401": {"description": "Missing/invalid X-Api-Key (reverse proxy)"},
+          "403": {"description": "Upload not allowed from this network (reverse proxy)"}
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "TusdUploadApiKey": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-Api-Key",
+        "description": "Upload API key enforced by reverse-proxy for /files/* (TUSD_UPLOAD_API_KEY)"
+      }
+    }
+  }
+}

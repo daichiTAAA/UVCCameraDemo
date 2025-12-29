@@ -57,3 +57,13 @@ ON CONFLICT (process) DO UPDATE SET
 - バックグラウンド保持削除/アーカイブは `Lifecycle.BackgroundIntervalMinutes` ごとに実行
 - UI を同一オリジンで配信する場合は `web` をビルドし、`StaticFiles.RootPath` で指す（Dockerfile は自動ビルド済み）
 - Compose では `compose/nginx.conf` で /api /files / を同一オリジンに集約
+
+## OpenAPI (Swagger) 生成
+OpenAPI JSON は Development の Swagger から取得して `docs/openapi/` に保存します。
+
+- 生成: `./scripts/generate_openapi_webserver.sh`
+- 出力: `docs/openapi/webserver.swagger.json`
+
+補足:
+- 生成時は `OPENAPI_EXPORT=true` を有効にして、DB/バックグラウンド依存を避けています（OpenAPI生成専用）。
+- `/files/*`（tusdアップロード）は ASP.NET ではなく reverse-proxy 経由で tusd が提供するため、Swagger自動生成だけでは出ません。必要な場合は `docs/openapi/overlays/tusd.paths.json` を生成物に注入しています。

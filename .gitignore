@@ -17,5 +17,8 @@ local.properties
 .tmp
 tmp
 
+# OpenAPI generation artifacts
+docs/openapi/.openapi_export_server.log
+
 .env
 .kotlin
