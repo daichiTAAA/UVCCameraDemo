@@ -82,6 +82,7 @@
     <string name="error_repairing">ファイルを修復中...</string>
     <string name="error_playback_failed">再生に失敗: %1$s</string>
     <string name="error_playback_failed_media">再生に失敗: MediaPlayer(%1$d,%2$d)</string>
+    <string name="error_playback_recording_in_progress">録画中のセグメントは再生できません</string>
     <string name="error_unknown">不明なエラー</string>
 
     <string name="preview_device_uvc">UVCカメラ</string>

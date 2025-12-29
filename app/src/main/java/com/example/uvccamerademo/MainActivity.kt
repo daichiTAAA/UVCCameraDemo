@@ -45,6 +45,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -120,26 +121,45 @@ private fun MainContent() {
     val context = LocalContext.current
     val repository = remember { RecordingRepository(context) }
     var screen by remember { mutableStateOf<Screen>(Screen.Preview) }
+    val isRecordingState = remember { mutableStateOf(false) }
+    val isFinalizingState = remember { mutableStateOf(false) }
+    val recordingPathState = remember { mutableStateOf<String?>(null) }
 
     Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-        when (val current = screen) {
-            Screen.Preview -> UvcPreviewScreen(
-                modifier = Modifier.padding(innerPadding),
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+        ) {
+            UvcPreviewScreen(
+                modifier = Modifier.fillMaxSize(),
                 recordingRepository = repository,
-                onOpenRecordings = { screen = Screen.Recordings }
+                onOpenRecordings = { screen = Screen.Recordings },
+                isRecordingState = isRecordingState,
+                isFinalizingState = isFinalizingState,
+                recordingPathState = recordingPathState
             )
-            Screen.Recordings -> RecordingListScreen(
-                modifier = Modifier.padding(innerPadding),
-                repository = repository,
-                onBack = { screen = Screen.Preview },
-                onPlay = { item -> screen = Screen.Playback(item) }
-            )
-            is Screen.Playback -> PlaybackScreen(
-                modifier = Modifier.padding(innerPadding),
-                repository = repository,
-                item = current.item,
-                onBack = { screen = Screen.Recordings }
-            )
+            when (val current = screen) {
+                Screen.Preview -> Unit
+                Screen.Recordings -> RecordingListScreen(
+                    modifier = Modifier.fillMaxSize(),
+                    repository = repository,
+                    onBack = { screen = Screen.Preview },
+                    onPlay = { item -> screen = Screen.Playback(item) },
+                    recordingPath = recordingPathState.value,
+                    isRecording = isRecordingState.value,
+                    isFinalizing = isFinalizingState.value
+                )
+                is Screen.Playback -> PlaybackScreen(
+                    modifier = Modifier.fillMaxSize(),
+                    repository = repository,
+                    item = current.item,
+                    onBack = { screen = Screen.Recordings },
+                    recordingPath = recordingPathState.value,
+                    isRecording = isRecordingState.value,
+                    isFinalizing = isFinalizingState.value
+                )
+            }
         }
     }
 }
@@ -148,7 +168,10 @@ private fun MainContent() {
 private fun UvcPreviewScreen(
     modifier: Modifier = Modifier,
     recordingRepository: RecordingRepository,
-    onOpenRecordings: () -> Unit
+    onOpenRecordings: () -> Unit,
+    isRecordingState: MutableState<Boolean>,
+    isFinalizingState: MutableState<Boolean>,
+    recordingPathState: MutableState<String?>
 ) {
     val context = LocalContext.current
     val isPreview = LocalInspectionMode.current
@@ -200,8 +223,9 @@ private fun UvcPreviewScreen(
         mutableStateOf(if (isPreview) previewStatus else idleStatus)
     }
     var isCameraOpened by remember { mutableStateOf(false) }
-    var isRecording by remember { mutableStateOf(false) }
-    var isFinalizing by remember { mutableStateOf(false) }
+    var isRecording by isRecordingState
+    var isFinalizing by isFinalizingState
+    var currentRecordingPath by recordingPathState
     var recordingStartAt by remember { mutableStateOf<Long?>(null) }
     var recordingElapsedMs by remember { mutableStateOf(0L) }
     var pendingOpen by remember { mutableStateOf(false) }
@@ -280,6 +304,7 @@ private fun UvcPreviewScreen(
             return@startRecording
         }
         isFinalizing = false
+        currentRecordingPath = file.absolutePath
         var createdRecorder: HevcRecorder? = null
         val callback = object : ICaptureCallBack {
             override fun onBegin() {
@@ -301,6 +326,7 @@ private fun UvcPreviewScreen(
                     recordingStartAt = null
                     isFinalizing = false
                     recorder = null
+                    currentRecordingPath = null
                     statusMessage = context.getString(
                         R.string.status_recording_failed,
                         error ?: context.getString(R.string.error_unknown)
@@ -314,6 +340,7 @@ private fun UvcPreviewScreen(
                     recordingStartAt = null
                     isFinalizing = false
                     recorder = null
+                    currentRecordingPath = null
                     statusMessage = context.getString(
                         R.string.status_saved,
                         path ?: context.getString(R.string.label_unknown_path)
@@ -330,6 +357,7 @@ private fun UvcPreviewScreen(
         )
         if (!createdRecorder.start()) {
             statusMessage = context.getString(R.string.status_record_start_failed)
+            currentRecordingPath = null
             return@startRecording
         }
         recorder = createdRecorder
@@ -373,20 +401,27 @@ private fun UvcPreviewScreen(
                 when (event) {
                     Lifecycle.Event.ON_START -> cameraStrategy.register()
                     Lifecycle.Event.ON_STOP -> {
-                        stopRecording()
-                        cameraClient.closeCamera()
-                        isCameraOpened = false
+                        if (!isRecording && !isFinalizing) {
+                            cameraClient.closeCamera()
+                            isCameraOpened = false
+                        }
                     }
-                    Lifecycle.Event.ON_DESTROY -> cameraStrategy.unRegister()
+                    Lifecycle.Event.ON_DESTROY -> {
+                        if (!isRecording && !isFinalizing) {
+                            cameraStrategy.unRegister()
+                        }
+                    }
                     else -> Unit
                 }
             }
             lifecycleOwner.lifecycle.addObserver(observer)
             onDispose {
                 lifecycleOwner.lifecycle.removeObserver(observer)
-                stopRecording()
-                cameraClient.closeCamera()
-                cameraStrategy.unRegister()
+                if (!isRecording && !isFinalizing) {
+                    cameraClient.closeCamera()
+                    isCameraOpened = false
+                    cameraStrategy.unRegister()
+                }
             }
         }
 
@@ -778,7 +813,10 @@ private fun RecordingListScreen(
     modifier: Modifier = Modifier,
     repository: RecordingRepository,
     onBack: () -> Unit,
-    onPlay: (RecordingItem) -> Unit
+    onPlay: (RecordingItem) -> Unit,
+    recordingPath: String?,
+    isRecording: Boolean,
+    isFinalizing: Boolean
 ) {
     val context = LocalContext.current
     var recordings by remember { mutableStateOf(emptyList<RecordingItem>()) }
@@ -911,10 +949,15 @@ private fun RecordingListScreen(
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     items(recordings, key = { it.path }) { item ->
+                        val isLocked =
+                            recordingPath != null &&
+                                recordingPath == item.path &&
+                                (isRecording || isFinalizing)
+                        val isPlayable = !isLocked
                         Card(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable { onPlay(item) },
+                                .clickable(enabled = isPlayable) { onPlay(item) },
                             shape = RoundedCornerShape(16.dp),
                             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
                         ) {
@@ -933,7 +976,7 @@ private fun RecordingListScreen(
                                 )
                                 Spacer(modifier = Modifier.height(10.dp))
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Button(onClick = { onPlay(item) }) {
+                                    Button(onClick = { onPlay(item) }, enabled = isPlayable) {
                                         Text(stringResource(R.string.action_play))
                                     }
                                     OutlinedButton(onClick = { deleteTarget = item }) {
@@ -954,7 +997,10 @@ private fun PlaybackScreen(
     modifier: Modifier = Modifier,
     repository: RecordingRepository,
     item: RecordingItem,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    recordingPath: String?,
+    isRecording: Boolean,
+    isFinalizing: Boolean
 ) {
     val context = LocalContext.current
     val view = LocalView.current
@@ -969,8 +1015,19 @@ private fun PlaybackScreen(
     var usePlatformPlayer by remember { mutableStateOf(false) }
     var videoViewRef by remember { mutableStateOf<VideoView?>(null) }
     var isFullscreen by rememberSaveable { mutableStateOf(false) }
+    val isRecordingSegment =
+        recordingPath != null &&
+            recordingPath == item.path &&
+            (isRecording || isFinalizing)
 
-    LaunchedEffect(item.path) {
+    LaunchedEffect(item.path, isRecordingSegment) {
+        if (isRecordingSegment) {
+            playableItem = item
+            isRepairing = false
+            errorMessage = context.getString(R.string.error_playback_recording_in_progress)
+            usePlatformPlayer = false
+            return@LaunchedEffect
+        }
         isRepairing = true
         errorMessage = null
         attemptedRepair = false
@@ -981,8 +1038,14 @@ private fun PlaybackScreen(
         isRepairing = false
     }
 
-    val exoPlayer = remember(playableItem.path, playbackToken, isRepairing, usePlatformPlayer) {
-        if (isRepairing || usePlatformPlayer) {
+    val exoPlayer = remember(
+        playableItem.path,
+        playbackToken,
+        isRepairing,
+        usePlatformPlayer,
+        isRecordingSegment
+    ) {
+        if (isRepairing || usePlatformPlayer || isRecordingSegment) {
             null
         } else {
             ExoPlayer.Builder(context)
