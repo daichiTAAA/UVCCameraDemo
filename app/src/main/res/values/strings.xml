@@ -20,7 +20,7 @@
     <string name="label_process_status">工程: %1$s</string>
     <string name="label_process_unselected">未選択</string>
     <string name="label_process_empty">工程候補がありません</string>
-    <string name="label_process_api_url">工程API URL</string>
+    <string name="label_process_api_url">API URL</string>
     <string name="label_qr_scan">QRコードを読み取ってください</string>
     <string name="label_no_devices">UVCデバイスがありません</string>
     <string name="label_no_recordings">録画はありません</string>
@@ -120,11 +120,13 @@
     <string name="message_qr_parse_failed">QRコードから型式/機番を取得できません</string>
     <string name="message_qr_scanned">QRコードを読み取りました</string>
     <string name="message_qr_cleared">QRコードをクリアしました</string>
+    <string name="message_qr_scan_uvc">UVCカメラの映像で読み取ります</string>
+    <string name="message_qr_requires_uvc">UVCカメラを開いてからQR読取を開始してください</string>
     <string name="message_process_fetch_success">工程を取得しました</string>
     <string name="message_process_fetch_failed_cache">取得に失敗しました。キャッシュを使用します</string>
     <string name="message_process_fetch_failed_unknown">取得に失敗しました。UNKNOWNで選択してください</string>
     <string name="message_process_selection_invalid">選択済み工程が候補にないため解除しました</string>
-    <string name="message_process_api_url_required">工程API URLを入力してください</string>
+    <string name="message_process_api_url_required">API URLを入力してください</string>
     <string name="message_camera_permission_required">カメラ権限が必要です</string>
 
     <string name="error_exoplayer">ExoPlayerエラー: %1$s</string>

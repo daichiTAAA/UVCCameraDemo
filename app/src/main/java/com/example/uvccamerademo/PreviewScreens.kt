@@ -2,6 +2,7 @@ package com.example.uvccamerademo
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -19,6 +20,7 @@ fun UvcPreviewScreenPreview() {
         height = BuildConfig.DEFAULT_PREVIEW_HEIGHT
     )
     UVCCameraDemoTheme {
+        val scrollState = rememberScrollState()
         UvcPreviewScreenContent(
             previewAspectRatio = selectedResolution.width.toFloat() / selectedResolution.height,
             statusMessage = stringResource(R.string.status_preview_mode),
@@ -64,7 +66,10 @@ fun UvcPreviewScreenPreview() {
                 ) {
                     Text(text = stringResource(R.string.label_preview))
                 }
-            }
+            },
+            scrollState = scrollState,
+            isScrollEnabled = true,
+            showQrScanner = false
         )
     }
 }

@@ -5,10 +5,12 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [WorkEntity::class, SegmentEntity::class],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -27,8 +29,16 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "uvc_camera.db"
-                ).build().also { instance = it }
+                ).addMigrations(MIGRATION_1_2).build().also { instance = it }
             }
         }
+    }
+}
+
+private val MIGRATION_1_2 = object : Migration(1, 2) {
+    override fun migrate(database: SupportSQLiteDatabase) {
+        database.execSQL(
+            "ALTER TABLE segments ADD COLUMN uploadRetryCount INTEGER NOT NULL DEFAULT 0"
+        )
     }
 }

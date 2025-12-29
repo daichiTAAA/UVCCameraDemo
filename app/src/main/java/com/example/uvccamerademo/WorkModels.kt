@@ -47,5 +47,6 @@ data class SegmentEntity(
     val uploadState: UploadState,
     val uploadRemoteId: String?,
     val uploadBytesSent: Long,
-    val uploadCompletedAt: Long?
+    val uploadCompletedAt: Long?,
+    val uploadRetryCount: Int
 )

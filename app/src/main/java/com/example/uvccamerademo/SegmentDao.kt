@@ -17,12 +17,90 @@ interface SegmentDao {
         """
         UPDATE segments
         SET durationMs = :durationMs,
-            sizeBytes = :sizeBytes
+            sizeBytes = :sizeBytes,
+            uploadState = CASE
+                WHEN workId IS NOT NULL AND uploadState = :pendingState THEN :pendingState
+                WHEN workId IS NOT NULL AND uploadState = :noneState THEN :pendingState
+                ELSE uploadState
+            END
         WHERE segmentUuid = :segmentUuid
         """
     )
-    suspend fun updateFinalized(segmentUuid: String, durationMs: Long, sizeBytes: Long)
+    suspend fun updateFinalized(
+        segmentUuid: String,
+        durationMs: Long,
+        sizeBytes: Long,
+        pendingState: UploadState,
+        noneState: UploadState
+    )
 
     @Query("DELETE FROM segments WHERE segmentUuid = :segmentUuid")
     suspend fun deleteById(segmentUuid: String)
+
+    @Query("SELECT * FROM segments WHERE segmentUuid = :segmentUuid")
+    suspend fun findById(segmentUuid: String): SegmentEntity?
+
+    @Query(
+        """
+        SELECT * FROM segments
+        WHERE workId IS NOT NULL
+            AND durationMs IS NOT NULL
+            AND sizeBytes IS NOT NULL
+            AND uploadState IN (:states)
+            AND (uploadState != :failedState OR uploadRetryCount < :maxRetryCount)
+        ORDER BY recordedAt ASC
+        LIMIT 1
+        """
+    )
+    suspend fun findNextUploadCandidate(
+        states: List<UploadState>,
+        failedState: UploadState,
+        maxRetryCount: Int
+    ): SegmentEntity?
+
+    @Query(
+        """
+        UPDATE segments
+        SET uploadState = :state,
+            uploadRemoteId = :remoteId,
+            uploadBytesSent = :bytesSent,
+            uploadRetryCount = :retryCount
+        WHERE segmentUuid = :segmentUuid
+        """
+    )
+    suspend fun updateUploadProgress(
+        segmentUuid: String,
+        state: UploadState,
+        remoteId: String?,
+        bytesSent: Long,
+        retryCount: Int
+    )
+
+    @Query(
+        """
+        UPDATE segments
+        SET uploadState = :state,
+            uploadRetryCount = :retryCount
+        WHERE segmentUuid = :segmentUuid
+        """
+    )
+    suspend fun updateUploadFailure(
+        segmentUuid: String,
+        state: UploadState,
+        retryCount: Int
+    )
+
+    @Query(
+        """
+        UPDATE segments
+        SET uploadState = :state,
+            uploadCompletedAt = :completedAt
+        WHERE segmentUuid = :segmentUuid
+        """
+    )
+    suspend fun markUploadCompleted(
+        segmentUuid: String,
+        state: UploadState,
+        completedAt: Long
+    )
 }

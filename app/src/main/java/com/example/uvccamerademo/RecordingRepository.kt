@@ -66,6 +66,11 @@ class RecordingRepository(context: Context) {
         } else {
             null
         }
+        val uploadState = if (workId != null) {
+            UploadState.PENDING
+        } else {
+            UploadState.NONE
+        }
         val segment = SegmentEntity(
             segmentUuid = segmentUuid,
             path = path,
@@ -74,10 +79,11 @@ class RecordingRepository(context: Context) {
             sizeBytes = null,
             workId = workId,
             segmentIndex = segmentIndex,
-            uploadState = UploadState.NONE,
+            uploadState = uploadState,
             uploadRemoteId = null,
             uploadBytesSent = 0L,
-            uploadCompletedAt = null
+            uploadCompletedAt = null,
+            uploadRetryCount = 0
         )
         segmentDao.insert(segment)
         segment
@@ -94,8 +100,15 @@ class RecordingRepository(context: Context) {
             val file = File(path)
             val durationMs = readDurationMs(file)
             val sizeBytes = file.length()
-            segmentDao.updateFinalized(segmentUuid, durationMs, sizeBytes)
+            segmentDao.updateFinalized(
+                segmentUuid,
+                durationMs,
+                sizeBytes,
+                UploadState.PENDING,
+                UploadState.NONE
+            )
         }
+        UploadScheduler.enqueueImmediate(appContext)
     }
 
     fun createRecordingFile(): File? {

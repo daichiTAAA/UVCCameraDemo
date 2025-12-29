@@ -17,10 +17,12 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -33,6 +35,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -108,6 +111,7 @@ import kotlinx.coroutines.launch
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        UploadScheduler.ensureScheduled(applicationContext)
         enableEdgeToEdge()
         WindowInsetsControllerCompat(window, window.decorView)
             .show(WindowInsetsCompat.Type.systemBars())
@@ -280,6 +284,26 @@ private fun UvcPreviewScreen(
     var qrSerial by rememberSaveable { mutableStateOf<String?>(null) }
     var qrMessage by remember { mutableStateOf<String?>(null) }
     var showQrScanner by remember { mutableStateOf(false) }
+    val contentScrollState = rememberScrollState()
+    val qrScanner = remember {
+        if (isPreview) {
+            null
+        } else {
+            UvcQrScanner { raw ->
+                mainHandler.post {
+                    val parsed = parseQrPayload(raw)
+                    if (parsed == null) {
+                        qrMessage = context.getString(R.string.message_qr_parse_failed)
+                    } else {
+                        qrModel = parsed.model
+                        qrSerial = parsed.serial
+                        qrMessage = context.getString(R.string.message_qr_scanned)
+                    }
+                    showQrScanner = false
+                }
+            }
+        }
+    }
 
     val processRepository = remember { ProcessRepository(context) }
     var processItems by remember { mutableStateOf<List<ProcessItem>>(emptyList()) }
@@ -302,6 +326,14 @@ private fun UvcPreviewScreen(
             ) {
                 if (data != null && format == IPreviewDataCallBack.DataFormat.NV21) {
                     recorder?.onPreviewFrame(data)
+                    if (showQrScanner) {
+                        qrScanner?.onFrame(
+                            data = data,
+                            width = selectedResolution.width,
+                            height = selectedResolution.height,
+                            rotationDegrees = 0
+                        )
+                    }
                 }
             }
         }
@@ -781,6 +813,23 @@ private fun UvcPreviewScreen(
         }
     }
 
+    DisposableEffect(qrScanner) {
+        onDispose { qrScanner?.release() }
+    }
+
+    LaunchedEffect(showQrScanner) {
+        qrScanner?.setActive(showQrScanner)
+        if (showQrScanner) {
+            contentScrollState.animateScrollTo(0)
+        }
+    }
+
+    LaunchedEffect(isCameraOpened) {
+        if (!isCameraOpened && showQrScanner) {
+            showQrScanner = false
+        }
+    }
+
     LaunchedEffect(isSegmentRecording, recordingStartAt) {
         if (isSegmentRecording && recordingStartAt != null) {
             while (isSegmentRecording) {
@@ -916,7 +965,16 @@ private fun UvcPreviewScreen(
             qrModel = qrModel,
             qrSerial = qrSerial,
             qrMessage = qrMessage,
-            onScanQr = { showQrScanner = true },
+            onScanQr = {
+                if (showQrScanner) {
+                    showQrScanner = false
+                } else if (!isCameraOpened) {
+                    qrMessage = context.getString(R.string.message_qr_requires_uvc)
+                } else {
+                    qrMessage = null
+                    showQrScanner = true
+                }
+            },
             onClearQr = {
                 qrModel = null
                 qrSerial = null
@@ -939,25 +997,11 @@ private fun UvcPreviewScreen(
             onClose = { handleClose() },
             onToggleRecord = { handleToggleRecord() },
             onOpenRecordings = onOpenRecordings,
-            previewContent = previewContent
+            previewContent = previewContent,
+            scrollState = contentScrollState,
+            isScrollEnabled = !showQrScanner,
+            showQrScanner = showQrScanner
         )
-
-        if (showQrScanner) {
-            QrScannerOverlay(
-                onDismiss = { showQrScanner = false },
-                onScanned = { raw ->
-                    val parsed = parseQrPayload(raw)
-                    if (parsed == null) {
-                        qrMessage = context.getString(R.string.message_qr_parse_failed)
-                    } else {
-                        qrModel = parsed.model
-                        qrSerial = parsed.serial
-                        qrMessage = context.getString(R.string.message_qr_scanned)
-                    }
-                    showQrScanner = false
-                }
-            )
-        }
     }
 }
 
@@ -997,7 +1041,10 @@ internal fun UvcPreviewScreenContent(
     onClose: () -> Unit,
     onToggleRecord: () -> Unit,
     onOpenRecordings: () -> Unit,
-    previewContent: @Composable (Modifier) -> Unit
+    previewContent: @Composable (Modifier) -> Unit,
+    scrollState: ScrollState,
+    isScrollEnabled: Boolean,
+    showQrScanner: Boolean
 ) {
     val backgroundBrush = Brush.verticalGradient(
         listOf(
@@ -1063,7 +1110,7 @@ internal fun UvcPreviewScreenContent(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .verticalScroll(rememberScrollState())
+                .verticalScroll(scrollState, enabled = isScrollEnabled)
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
@@ -1127,6 +1174,23 @@ internal fun UvcPreviewScreenContent(
                             .background(MaterialTheme.colorScheme.surfaceVariant)
                     ) {
                         previewContent(Modifier.fillMaxSize())
+                        if (showQrScanner) {
+                            androidx.compose.foundation.layout.BoxWithConstraints(
+                                modifier = Modifier.fillMaxSize()
+                            ) {
+                                val frameSize = minOf(maxWidth, maxHeight) * 0.65f
+                                Box(
+                                    modifier = Modifier
+                                        .align(Alignment.Center)
+                                        .size(frameSize)
+                                        .border(
+                                            width = 2.dp,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            shape = RoundedCornerShape(12.dp)
+                                        )
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -1421,6 +1485,7 @@ private fun StatusPill(
         )
     }
 }
+
 
 @Composable
 private fun RecordingListScreen(
