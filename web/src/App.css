@@ -167,6 +167,11 @@ button.ghost {
   color: var(--text);
 }
 
+.ghost.compact {
+  padding: 10px 12px;
+  white-space: nowrap;
+}
+
 .ghost:hover {
   border-color: var(--accent);
 }
@@ -215,6 +220,16 @@ button.ghost {
   background: var(--panel-strong);
   padding: 10px 12px;
   color: var(--text);
+}
+
+.field-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.field-row input {
+  flex: 1;
 }
 
 .field input:focus {

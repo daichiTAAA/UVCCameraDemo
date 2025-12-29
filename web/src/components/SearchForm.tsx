@@ -15,6 +15,19 @@ export function SearchForm({
 }: SearchFormProps) {
   const [filters, setFilters] = useState<SearchFilters>(initialFilters);
 
+  const openDatePicker = (inputId: string) => {
+    const element = document.getElementById(inputId) as HTMLInputElement | null;
+    if (!element) return;
+
+    const anyElement = element as unknown as { showPicker?: () => void };
+    if (typeof anyElement.showPicker === "function") {
+      anyElement.showPicker();
+      return;
+    }
+
+    element.focus();
+  };
+
   const update =
     (key: keyof SearchFilters) => (event: ChangeEvent<HTMLInputElement>) => {
       setFilters((prev) => ({ ...prev, [key]: event.target.value }));
@@ -81,21 +94,43 @@ export function SearchForm({
         </label>
         <label className="field">
           <span>録画日 (from)</span>
-          <input
-            type="date"
-            name="from"
-            value={filters.from ?? ""}
-            onChange={update("from")}
-          />
+          <div className="field-row">
+            <input
+              id="date-from"
+              type="date"
+              name="from"
+              value={filters.from ?? ""}
+              onChange={update("from")}
+            />
+            <button
+              type="button"
+              className="ghost compact"
+              onClick={() => openDatePicker("date-from")}
+              disabled={loading}
+            >
+              選択
+            </button>
+          </div>
         </label>
         <label className="field">
           <span>録画日 (to)</span>
-          <input
-            type="date"
-            name="to"
-            value={filters.to ?? ""}
-            onChange={update("to")}
-          />
+          <div className="field-row">
+            <input
+              id="date-to"
+              type="date"
+              name="to"
+              value={filters.to ?? ""}
+              onChange={update("to")}
+            />
+            <button
+              type="button"
+              className="ghost compact"
+              onClick={() => openDatePicker("date-to")}
+              disabled={loading}
+            >
+              選択
+            </button>
+          </div>
         </label>
       </div>
     </form>
