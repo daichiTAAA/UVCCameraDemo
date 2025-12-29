@@ -18,20 +18,6 @@ fun UvcPreviewScreenPreview() {
         width = BuildConfig.DEFAULT_PREVIEW_WIDTH,
         height = BuildConfig.DEFAULT_PREVIEW_HEIGHT
     )
-    val devices = listOf(
-        UvcDeviceInfo(
-            id = "1001",
-            name = stringResource(R.string.preview_device_uvc),
-            vendorId = 4660,
-            productId = 22136
-        ),
-        UvcDeviceInfo(
-            id = "1002",
-            name = stringResource(R.string.preview_device_usb_capture),
-            vendorId = 11325,
-            productId = 8
-        )
-    )
     UVCCameraDemoTheme {
         UvcPreviewScreenContent(
             previewAspectRatio = selectedResolution.width.toFloat() / selectedResolution.height,
@@ -40,15 +26,11 @@ fun UvcPreviewScreenPreview() {
             isRecording = true,
             isFinalizing = false,
             recordingElapsedMs = 65_000L,
-            selectedDeviceId = devices.first().id,
             selectedResolution = selectedResolution,
-            deviceList = devices,
             onOpen = {},
             onClose = {},
             onToggleRecord = {},
-            onRefreshDevices = {},
             onOpenRecordings = {},
-            onSelectDevice = {},
             previewContent = { contentModifier ->
                 Box(
                     modifier = contentModifier.background(MaterialTheme.colorScheme.surfaceVariant),

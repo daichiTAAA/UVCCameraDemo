@@ -27,7 +27,6 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -41,7 +40,6 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -50,7 +48,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -116,13 +113,6 @@ private sealed interface Screen {
 }
 
 internal data class ResolutionOption(val width: Int, val height: Int)
-
-internal data class UvcDeviceInfo(
-    val id: String,
-    val name: String,
-    val vendorId: Int,
-    val productId: Int
-)
 
 @Composable
 private fun MainContent() {
@@ -202,7 +192,6 @@ private fun UvcPreviewScreen(
         }
     }
 
-    val deviceList = remember { mutableStateListOf<UvcDeviceInfo>() }
     var selectedDeviceId by remember { mutableStateOf<String?>(null) }
     val previewStatus = stringResource(R.string.status_preview_mode)
     val idleStatus = stringResource(R.string.status_idle)
@@ -236,7 +225,6 @@ private fun UvcPreviewScreen(
     }
 
     fun refreshDevices() {
-        deviceList.clear()
         if (isPreview || cameraStrategy == null) {
             selectedDeviceId = null
             return
@@ -244,19 +232,11 @@ private fun UvcPreviewScreen(
         val devices = cameraStrategy.getUsbDeviceList()
         if (devices.isNullOrEmpty()) {
             selectedDeviceId = null
-        } else {
-            val mapped = devices.map { device ->
-                UvcDeviceInfo(
-                    id = device.deviceId.toString(),
-                    name = device.productName ?: device.deviceName,
-                    vendorId = device.vendorId,
-                    productId = device.productId
-                )
-            }
-            deviceList.addAll(mapped)
-            if (selectedDeviceId == null || mapped.none { it.id == selectedDeviceId }) {
-                selectedDeviceId = mapped.first().id
-            }
+            return
+        }
+        val currentId = selectedDeviceId
+        if (currentId == null || devices.none { it.deviceId.toString() == currentId }) {
+            selectedDeviceId = devices.first().deviceId.toString()
         }
     }
 
@@ -576,15 +556,11 @@ private fun UvcPreviewScreen(
         isRecording = isRecording,
         isFinalizing = isFinalizing,
         recordingElapsedMs = recordingElapsedMs,
-        selectedDeviceId = selectedDeviceId,
         selectedResolution = selectedResolution,
-        deviceList = deviceList,
         onOpen = { handleOpen() },
         onClose = { handleClose() },
         onToggleRecord = { handleToggleRecord() },
-        onRefreshDevices = { refreshDevices() },
         onOpenRecordings = onOpenRecordings,
-        onSelectDevice = { selectedDeviceId = it },
         previewContent = previewContent
     )
 }
@@ -598,15 +574,11 @@ internal fun UvcPreviewScreenContent(
     isRecording: Boolean,
     isFinalizing: Boolean,
     recordingElapsedMs: Long,
-    selectedDeviceId: String?,
     selectedResolution: ResolutionOption,
-    deviceList: List<UvcDeviceInfo>,
     onOpen: () -> Unit,
     onClose: () -> Unit,
     onToggleRecord: () -> Unit,
-    onRefreshDevices: () -> Unit,
     onOpenRecordings: () -> Unit,
-    onSelectDevice: (String) -> Unit,
     previewContent: @Composable (Modifier) -> Unit
 ) {
     val backgroundBrush = Brush.verticalGradient(
@@ -777,96 +749,6 @@ internal fun UvcPreviewScreenContent(
                     }
                 }
             }
-
-            Card(
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-            ) {
-                Column(
-                    modifier = Modifier.padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = stringResource(R.string.label_devices),
-                            style = MaterialTheme.typography.titleMedium
-                        )
-                        OutlinedButton(onClick = onRefreshDevices) {
-                            Text(stringResource(R.string.action_refresh))
-                        }
-                    }
-                    if (deviceList.isEmpty()) {
-                        Text(
-                            text = stringResource(R.string.label_no_devices),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    } else {
-                        LazyColumn(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(max = 240.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            items(deviceList, key = { it.id }) { device ->
-                                val isSelected = device.id == selectedDeviceId
-                                val containerColor = if (isSelected) {
-                                    MaterialTheme.colorScheme.secondaryContainer
-                                } else {
-                                    MaterialTheme.colorScheme.surface
-                                }
-                                val contentColor = if (isSelected) {
-                                    MaterialTheme.colorScheme.onSecondaryContainer
-                                } else {
-                                    MaterialTheme.colorScheme.onSurface
-                                }
-                                val detailColor = if (isSelected) {
-                                    MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f)
-                                } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                }
-                                Surface(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable { onSelectDevice(device.id) },
-                                    color = containerColor,
-                                    contentColor = contentColor,
-                                    tonalElevation = if (isSelected) 2.dp else 0.dp,
-                                    shape = RoundedCornerShape(12.dp)
-                                ) {
-                                    Row(
-                                        modifier = Modifier.padding(10.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        RadioButton(
-                                            selected = isSelected,
-                                            onClick = { onSelectDevice(device.id) }
-                                        )
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Text(text = device.name)
-                                            Text(
-                                                text = stringResource(
-                                                    R.string.label_device_details,
-                                                    device.id,
-                                                    device.vendorId,
-                                                    device.productId
-                                                ),
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = detailColor
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
         }
     }
 }
