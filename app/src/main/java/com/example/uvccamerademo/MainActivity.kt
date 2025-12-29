@@ -8,6 +8,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.view.LayoutInflater
 import android.widget.MediaController
 import android.widget.VideoView
 import androidx.activity.ComponentActivity
@@ -1098,10 +1099,14 @@ private fun PlaybackScreen(
             AndroidView(
                 modifier = surfaceModifier,
                 factory = {
-                    PlayerView(it).apply {
-                        player = exoPlayer
-                        useController = true
+                    LayoutInflater.from(it)
+                        .inflate(R.layout.view_player, null, false) as PlayerView
+                },
+                update = { view ->
+                    if (view.player !== exoPlayer) {
+                        view.player = exoPlayer
                     }
+                    view.useController = true
                 }
             )
         }
