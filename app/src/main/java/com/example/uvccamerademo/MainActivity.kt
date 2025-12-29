@@ -100,6 +100,8 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        WindowInsetsControllerCompat(window, window.decorView)
+            .show(WindowInsetsCompat.Type.systemBars())
         setContent {
             UVCCameraDemoTheme {
                 MainContent()
@@ -1118,7 +1120,12 @@ private fun PlaybackScreen(
                 controller.show(WindowInsetsCompat.Type.systemBars())
             }
         }
-        onDispose { }
+        onDispose {
+            if (window != null) {
+                WindowInsetsControllerCompat(window, view)
+                    .show(WindowInsetsCompat.Type.systemBars())
+            }
+        }
     }
 
     @Composable
