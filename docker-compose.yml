@@ -37,9 +37,14 @@ services:
       Storage__MetadataPath: /data/metadata.json
       Security__ApiKey: ${API_KEY:-}
       Security__TusdHookApiKey: ${TUSD_HOOK_API_KEY:-}
-      Maintenance__RetentionDays: 7
-      Maintenance__AllowDeleteUnarchived: "false"
-      Maintenance__BackgroundIntervalMinutes: 60
+      Lifecycle__RetentionDays: 7
+      Lifecycle__AllowDeleteUnarchived: "false"
+      Lifecycle__BackgroundIntervalMinutes: 60
+      Adls__Enabled: ${ADLS_ENABLED:-false}
+      Adls__AccountUrl: ${ADLS_ACCOUNT_URL:-}
+      Adls__Container: ${ADLS_CONTAINER:-}
+      Adls__Prefix: ${ADLS_PREFIX:-videos}
+      Adls__SasToken: ${ADLS_SAS_TOKEN:-}
     volumes:
       - videos:/data/videos
     depends_on:

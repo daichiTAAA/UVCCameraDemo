@@ -2,7 +2,7 @@ using WebServer.Application.Models;
 
 namespace WebServer.Application.Ports;
 
-public interface IWorkQueryPort
+public interface IMetadataQueryPort
 {
     Task<IReadOnlyList<ProcessInfo>> GetProcessesAsync(CancellationToken ct);
     Task<IReadOnlyList<WorkSummary>> SearchWorksAsync(WorkSearchQuery query, CancellationToken ct);
@@ -11,10 +11,10 @@ public interface IWorkQueryPort
 
 public interface ISegmentDeliveryPort
 {
-    Task<SegmentStreamResult?> GetSegmentAsync(Guid segmentId, bool asAttachment, CancellationToken ct);
+    Task<SegmentStreamResult?> GetSegmentAsync(Guid segmentId, bool asAttachment, long? offset, long? length, CancellationToken ct);
 }
 
-public interface IIngestionAndMaintenancePort
+public interface IIngestionAndLifecyclePort
 {
     Task<IngestionResult> HandleUploadCompletedAsync(UploadCompletedModel model, CancellationToken ct);
     Task<int> RunCleanupAsync(TimeSpan retention, bool allowDeleteUnarchived, CancellationToken ct);
@@ -24,7 +24,8 @@ public interface IIngestionAndMaintenancePort
 public sealed record SegmentStreamResult(
     SegmentView Segment,
     Stream Stream,
-    long Length,
+    long TotalLength,
+    long ContentLength,
     string ContentType,
     DateTimeOffset? LastModified,
     bool IsAttachment);

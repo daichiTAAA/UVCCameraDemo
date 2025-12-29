@@ -1,6 +1,8 @@
+using Dapper;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Options;
+using WebServer.Api;
 using WebServer.Api.Requests;
 using WebServer.Application.Models;
 using WebServer.Application.Ports;
@@ -10,15 +12,19 @@ using WebServer.Infrastructure;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Ensure snake_case DB columns map to PascalCase properties (e.g. segment_id -> SegmentId).
+DefaultTypeMap.MatchNamesWithUnderscores = true;
+
 builder.Services.Configure<StorageOptions>(builder.Configuration.GetSection("Storage"));
 builder.Services.Configure<SecurityOptions>(builder.Configuration.GetSection("Security"));
-builder.Services.Configure<MaintenanceOptions>(builder.Configuration.GetSection("Maintenance"));
+builder.Services.Configure<LifecycleOptions>(builder.Configuration.GetSection("Lifecycle"));
+builder.Services.Configure<AdlsOptions>(builder.Configuration.GetSection("Adls"));
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
 builder.Services.AddSingleton<IClockPort, SystemClock>();
-builder.Services.AddSingleton<IWorkStorePort>(sp =>
+builder.Services.AddSingleton<IMetadataStorePort>(sp =>
 {
     var configuration = sp.GetRequiredService<IConfiguration>();
     var connectionString = configuration.GetConnectionString("Main");
@@ -27,15 +33,16 @@ builder.Services.AddSingleton<IWorkStorePort>(sp =>
         throw new InvalidOperationException("ConnectionStrings:Main is required (PostgreSQL)");
     }
 
-    var store = new PostgresWorkStore(connectionString, sp.GetRequiredService<ILogger<PostgresWorkStore>>());
+    var store = new PostgresMetadataStore(connectionString, sp.GetRequiredService<ILogger<PostgresMetadataStore>>());
     store.InitializeAsync(CancellationToken.None).GetAwaiter().GetResult();
     return store;
 });
 builder.Services.AddSingleton<IVideoStoragePort>(sp => new FileSystemVideoStorage(sp.GetRequiredService<IOptions<StorageOptions>>().Value));
-builder.Services.AddSingleton<IWorkQueryPort, WorkQueryService>();
+builder.Services.AddSingleton<IArchiveStoragePort>(sp => new AdlsBlobStorage(sp.GetRequiredService<IOptions<AdlsOptions>>().Value, sp.GetRequiredService<ILogger<AdlsBlobStorage>>()));
+builder.Services.AddSingleton<IMetadataQueryPort, MetadataQueryService>();
 builder.Services.AddSingleton<ISegmentDeliveryPort, SegmentDeliveryService>();
-builder.Services.AddSingleton<IIngestionAndMaintenancePort, IngestionAndMaintenanceService>();
-builder.Services.AddHostedService<MaintenanceHostedService>();
+builder.Services.AddSingleton<IIngestionAndLifecyclePort, IngestionAndLifecycleService>();
+builder.Services.AddHostedService<LifecycleHostedService>();
 
 var app = builder.Build();
 
@@ -62,7 +69,7 @@ if (!string.IsNullOrWhiteSpace(staticRoot))
 
 app.MapGet("/api/health", () => Results.Ok(new { status = "ok" }));
 
-app.MapGet("/api/processes", async (IWorkQueryPort port, CancellationToken ct) =>
+app.MapGet("/api/processes", async (IMetadataQueryPort port, CancellationToken ct) =>
 {
     var result = await port.GetProcessesAsync(ct);
     return Results.Ok(result);
@@ -75,7 +82,7 @@ app.MapGet("/api/works", async (
     [FromQuery] string? process,
     [FromQuery] DateTimeOffset? from,
     [FromQuery] DateTimeOffset? to,
-    IWorkQueryPort port,
+    IMetadataQueryPort port,
     CancellationToken ct) =>
 {
     var query = new WorkSearchQuery(workId, model, serial, process, from, to);
@@ -83,7 +90,7 @@ app.MapGet("/api/works", async (
     return Results.Ok(result);
 });
 
-app.MapGet("/api/works/{workId}", async (string workId, IWorkQueryPort port, CancellationToken ct) =>
+app.MapGet("/api/works/{workId}", async (string workId, IMetadataQueryPort port, CancellationToken ct) =>
 {
     var detail = await port.GetWorkDetailAsync(workId, ct);
     return detail is null
@@ -91,27 +98,20 @@ app.MapGet("/api/works/{workId}", async (string workId, IWorkQueryPort port, Can
         : Results.Ok(detail);
 });
 
-app.MapGet("/api/segments/{segmentId:guid}/download", async (Guid segmentId, ISegmentDeliveryPort delivery, CancellationToken ct) =>
+app.MapGet("/api/segments/{segmentId:guid}/download", (Guid segmentId, ISegmentDeliveryPort delivery) =>
 {
-    var result = await delivery.GetSegmentAsync(segmentId, true, ct);
-    if (result is null) return Results.NotFound(new { error = "NOT_FOUND", message = "segment not found" });
-
-    var fileName = BuildFileName(result.Segment);
-    return Results.File(result.Stream, result.ContentType, fileName, enableRangeProcessing: true, lastModified: result.LastModified);
+    return new SegmentContentResult(segmentId, asAttachment: true, delivery);
 });
 
-app.MapGet("/api/segments/{segmentId:guid}/stream", async (Guid segmentId, ISegmentDeliveryPort delivery, CancellationToken ct) =>
+app.MapGet("/api/segments/{segmentId:guid}/stream", (Guid segmentId, ISegmentDeliveryPort delivery) =>
 {
-    var result = await delivery.GetSegmentAsync(segmentId, false, ct);
-    if (result is null) return Results.NotFound(new { error = "NOT_FOUND", message = "segment not found" });
-
-    return Results.File(result.Stream, result.ContentType, enableRangeProcessing: true, lastModified: result.LastModified);
+    return new SegmentContentResult(segmentId, asAttachment: false, delivery);
 });
 
 app.MapPost("/api/tusd/hooks/completed", async (
     HttpContext context,
     UploadCompletedRequest request,
-    IIngestionAndMaintenancePort useCase,
+    IIngestionAndLifecyclePort useCase,
     IOptions<SecurityOptions> security,
     ILoggerFactory loggerFactory,
     CancellationToken ct) =>
@@ -147,23 +147,17 @@ app.MapPost("/api/tusd/hooks/completed", async (
     }
 });
 
-app.MapPost("/api/jobs/cleanup", async (IIngestionAndMaintenancePort useCase, IOptions<MaintenanceOptions> maintenance, CancellationToken ct) =>
+app.MapPost("/api/jobs/cleanup", async (IIngestionAndLifecyclePort useCase, IOptions<LifecycleOptions> lifecycle, CancellationToken ct) =>
 {
-    var retention = TimeSpan.FromDays(maintenance.Value.RetentionDays);
-    var count = await useCase.RunCleanupAsync(retention, maintenance.Value.AllowDeleteUnarchived, ct);
+    var retention = TimeSpan.FromDays(lifecycle.Value.RetentionDays);
+    var count = await useCase.RunCleanupAsync(retention, lifecycle.Value.AllowDeleteUnarchived, ct);
     return Results.Ok(new { deleted = count });
 });
 
-app.MapPost("/api/jobs/archive", async (IIngestionAndMaintenancePort useCase, CancellationToken ct) =>
+app.MapPost("/api/jobs/archive", async (IIngestionAndLifecyclePort useCase, CancellationToken ct) =>
 {
     var count = await useCase.RunArchiveAsync(ct);
     return Results.Ok(new { archived = count });
 });
 
 app.Run();
-
-static string BuildFileName(SegmentView segment)
-{
-    var sanitizedWork = string.Concat(segment.WorkId.Select(ch => Path.GetInvalidFileNameChars().Contains(ch) ? '-' : ch));
-    return $"{sanitizedWork}-{segment.SegmentIndex}-{segment.SegmentUuid}.mp4";
-}

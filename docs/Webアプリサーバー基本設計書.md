@@ -122,14 +122,15 @@
 ## 7. 境界インタフェース（Ports）
 ### 7.1 Inbound Ports（ユースケース入口）
 Inboundは「外部イベント/リクエストをUse Case呼び出しへ変換する境界」。HTTP/tusd/スケジューラはここを呼ぶ。
-- `WorkQueryPort`：工程マスタ/作業一覧/作業詳細の取得（読み取り系）
+- `MetadataQueryPort`：工程マスタ/作業一覧/作業詳細の取得（読み取り系）
 - `SegmentDeliveryPort`：セグメント配信（download/stream、Range含む）
-- `IngestionAndMaintenancePort`：tusd完了処理/日次アーカイブ/保持期限削除（取り込み・保守系）
+- `IngestionAndLifecyclePort`：tusd完了処理/日次アーカイブ/保持期限削除（取り込み・ライフサイクル系）
 
 ### 7.2 Outbound Ports（外部I/Oの抽象）
 Use Caseは以下の抽象にのみ依存し、具体実装は外側に置く。
-- `WorkStorePort`：工程/作業/セグメントの永続化（取得/検索/Upsert、アーカイブ状態更新）
-- `VideoStoragePort`：動画の保存/取得（ローカル・ADLSを内部で扱う。配信はローカル優先→ADLSフォールバック）
+- `MetadataStorePort`：工程/作業/セグメントの永続化（取得/検索/Upsert、アーカイブ状態更新）
+- `VideoStoragePort`：動画の保存/取得（ローカルFS: incoming→確定配置、存在確認、削除、読み取り）
+- `ArchiveStoragePort`：アーカイブ先ストレージ（現実装はADLS/Blob）。properties取得、Range読み取り、アップロード
 - `ClockPort`：現在時刻（`createdAt/updatedAt/archivedAt`）
 
 ---
@@ -215,7 +216,7 @@ Use Caseは以下の抽象にのみ依存し、具体実装は外側に置く。
 
 **tusd Hook Receiver（Inbound Adapter）の責務**
 - tusdが提供する完了イベントを受信する
-- API Model（tusdイベント）を Use Case Model に変換し `IngestionAndMaintenancePort` を呼ぶ
+- API Model（tusdイベント）を Use Case Model に変換し `IngestionAndLifecyclePort` を呼ぶ
 
 **UploadCompleted（Use Case）の責務（冪等）**
 1) 一時ファイルを正式保存先へ移動（必要な場合）

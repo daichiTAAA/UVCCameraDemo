@@ -3,7 +3,7 @@
 ## Webサーバー（ASP.NET Minimal API）
 - プロジェクト: `webserver/`
 - 実行: `dotnet run --project webserver/WebServer.csproj`
-- 設定: `webserver/appsettings.json` で `ConnectionStrings.Main`（PostgreSQL必須）, `Storage`（動画保存先）, `Security`（`X-Api-Key`）, `Maintenance`（保持日数/定期実行間隔）, `StaticFiles.RootPath`（ビルドUI配信用）を調整
+- 設定: `webserver/appsettings.json` で `ConnectionStrings.Main`（PostgreSQL必須）, `Storage`（動画保存先）, `Security`（`X-Api-Key`）, `Lifecycle`（保持日数/定期実行間隔）, `StaticFiles.RootPath`（ビルドUI配信用）を調整
 - スキーマ: `webserver/db/schema.sql`
 - 主なエンドポイント（`X-Api-Key` を設定している場合は必須）
 	- `GET /api/processes` 工程マスタ取得
@@ -13,7 +13,7 @@
 	- `GET /api/segments/{segmentId}/stream` ストリーミング（Range対応）
 	- `POST /api/tusd/hooks/completed` tusdフック（メタデータ復元対応）
 	- `POST /api/jobs/cleanup` ローカル保持期限削除（バックグラウンド実行あり）
-	- `POST /api/jobs/archive` ADLSアーカイブ（現状スタブ）
+	- `POST /api/jobs/archive` ADLSアーカイブ
 
 ### Docker Compose で起動
 - `.env.example` を `.env` にコピーして API キーや DB パスワードを設定

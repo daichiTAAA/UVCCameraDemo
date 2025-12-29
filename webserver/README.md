@@ -17,7 +17,7 @@
 - `ConnectionStrings.Main`: PostgreSQL への接続文字列（必須）
 - `Storage`: `LocalRoot`(動画ルート), `IncomingSubdirectory`, `MetadataPath`
 - `Security`: `ApiKey`（全API）/`TusdHookApiKey`（tusdフック専用）
-- `Maintenance`: `RetentionDays`, `AllowDeleteUnarchived`, `BackgroundIntervalMinutes`
+- `Lifecycle`: `RetentionDays`, `AllowDeleteUnarchived`, `BackgroundIntervalMinutes`
 - `StaticFiles.RootPath`: ビルド済み UI を同一オリジン配信するルート（例: `../webui/dist` または `/app/wwwroot`）
 
 ## 主なエンドポイント
@@ -29,7 +29,7 @@
 - `GET /api/segments/{segmentId}/download` （Range対応, attachment）
 - `POST /api/tusd/hooks/completed` （tusd完了フック）
 - `POST /api/jobs/cleanup` （保持期限削除 / バックグラウンド実行あり）
-- `POST /api/jobs/archive` （ADLSアーカイブ: 現状スタブ）
+- `POST /api/jobs/archive` （ADLSアーカイブ）
 
 ## ストレージ実装（現状）
 - メタデータ: PostgreSQL (`ConnectionStrings.Main`)
@@ -39,6 +39,6 @@
 ## 開発メモ
 - `X-Api-Key` を設定すると全API/フックで必須
 - tusd フックは `X-Api-Key: {Security.TusdHookApiKey}` を利用可
-- バックグラウンド保持削除/アーカイブは `Maintenance.BackgroundIntervalMinutes` ごとに実行
+- バックグラウンド保持削除/アーカイブは `Lifecycle.BackgroundIntervalMinutes` ごとに実行
 - UI を同一オリジンで配信する場合は `web` をビルドし、`StaticFiles.RootPath` で指す（Dockerfile は自動ビルド済み）
 - Compose では `compose/nginx.conf` で /api /files / を同一オリジンに集約
