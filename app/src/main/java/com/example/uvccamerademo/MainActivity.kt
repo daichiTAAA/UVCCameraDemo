@@ -121,11 +121,22 @@ internal data class ResolutionOption(val width: Int, val height: Int)
 @Composable
 private fun MainContent() {
     val context = LocalContext.current
+    val view = LocalView.current
+    val window = (context as? Activity)?.window
     val repository = remember { RecordingRepository(context) }
     var screen by remember { mutableStateOf<Screen>(Screen.Preview) }
     val isRecordingState = remember { mutableStateOf(false) }
     val isFinalizingState = remember { mutableStateOf(false) }
     val recordingPathState = remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(screen) {
+        if (window != null) {
+            WindowCompat.setDecorFitsSystemWindows(window, false)
+            val controller = WindowInsetsControllerCompat(window, view)
+            controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_DEFAULT
+            controller.show(WindowInsetsCompat.Type.systemBars())
+        }
+    }
 
     Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
         Box(
@@ -1117,13 +1128,16 @@ private fun PlaybackScreen(
                 controller.systemBarsBehavior =
                     WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             } else {
+                controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_DEFAULT
                 controller.show(WindowInsetsCompat.Type.systemBars())
             }
         }
         onDispose {
             if (window != null) {
-                WindowInsetsControllerCompat(window, view)
-                    .show(WindowInsetsCompat.Type.systemBars())
+                WindowCompat.setDecorFitsSystemWindows(window, false)
+                val controller = WindowInsetsControllerCompat(window, view)
+                controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_DEFAULT
+                controller.show(WindowInsetsCompat.Type.systemBars())
             }
         }
     }
