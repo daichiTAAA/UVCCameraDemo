@@ -8,6 +8,21 @@
 - 実行: `dotnet run --project WebServer.csproj`
 - ビルド: `dotnet build WebServer.sln`
 
+### 工程マスタ（テストデータ登録）
+`GET /api/processes` は工程マスタ専用テーブル `processes` から取得します。
+
+docker compose で起動時にテスト工程を自動投入したい場合は、`.env` で `TEST_DATA_ENABLED=true` を設定してください。
+
+例（追加/更新）:
+```sql
+INSERT INTO processes (process, display_order, is_active, created_at, updated_at)
+VALUES ('工程A', 1, TRUE, NOW(), NOW())
+ON CONFLICT (process) DO UPDATE SET
+	display_order = EXCLUDED.display_order,
+	is_active = EXCLUDED.is_active,
+	updated_at = EXCLUDED.updated_at;
+```
+
 ### Docker Compose（本番/検証）
 - ルートで `.env.example` を `.env` にコピーし値を設定
 - `docker compose up -d --build`

@@ -32,6 +32,7 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       ConnectionStrings__Main: Host=postgres;Port=5432;Database=uvc;Username=${POSTGRES_USER:-uvc};Password=${POSTGRES_PASSWORD:-uvc}
+      TestData__Enabled: ${TEST_DATA_ENABLED:-false}
       Storage__LocalRoot: /data/videos
       Storage__IncomingSubdirectory: incoming
       Storage__MetadataPath: /data/metadata.json

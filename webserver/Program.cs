@@ -19,6 +19,7 @@ builder.Services.Configure<StorageOptions>(builder.Configuration.GetSection("Sto
 builder.Services.Configure<SecurityOptions>(builder.Configuration.GetSection("Security"));
 builder.Services.Configure<LifecycleOptions>(builder.Configuration.GetSection("Lifecycle"));
 builder.Services.Configure<AdlsOptions>(builder.Configuration.GetSection("Adls"));
+builder.Services.Configure<TestDataOptions>(builder.Configuration.GetSection("TestData"));
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
@@ -33,7 +34,10 @@ builder.Services.AddSingleton<IMetadataStorePort>(sp =>
         throw new InvalidOperationException("ConnectionStrings:Main is required (PostgreSQL)");
     }
 
-    var store = new PostgresMetadataStore(connectionString, sp.GetRequiredService<ILogger<PostgresMetadataStore>>());
+    var store = new PostgresMetadataStore(
+        connectionString,
+        sp.GetRequiredService<IOptions<TestDataOptions>>().Value,
+        sp.GetRequiredService<ILogger<PostgresMetadataStore>>());
     store.InitializeAsync(CancellationToken.None).GetAwaiter().GetResult();
     return store;
 });
@@ -72,7 +76,10 @@ app.MapGet("/api/health", () => Results.Ok(new { status = "ok" }));
 app.MapGet("/api/processes", async (IMetadataQueryPort port, CancellationToken ct) =>
 {
     var result = await port.GetProcessesAsync(ct);
-    return Results.Ok(result);
+    return Results.Ok(new
+    {
+        items = result.Select(p => new { id = p.Name, name = p.Name })
+    });
 });
 
 app.MapGet("/api/works", async (

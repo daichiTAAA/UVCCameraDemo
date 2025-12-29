@@ -3,6 +3,7 @@ using Dapper;
 using Npgsql;
 using WebServer.Application.Models;
 using WebServer.Application.Ports;
+using WebServer.Configuration;
 using WebServer.Domain;
 
 namespace WebServer.Infrastructure;
@@ -10,11 +11,13 @@ namespace WebServer.Infrastructure;
 public sealed class PostgresMetadataStore : IMetadataStorePort
 {
     private readonly string connectionString;
+    private readonly TestDataOptions testData;
     private readonly ILogger<PostgresMetadataStore> logger;
 
-    public PostgresMetadataStore(string connectionString, ILogger<PostgresMetadataStore> logger)
+    public PostgresMetadataStore(string connectionString, TestDataOptions testData, ILogger<PostgresMetadataStore> logger)
     {
         this.connectionString = connectionString;
+        this.testData = testData;
         this.logger = logger;
     }
 
@@ -24,6 +27,14 @@ public sealed class PostgresMetadataStore : IMetadataStorePort
         await conn.OpenAsync(ct);
 
         const string sql = @"
+CREATE TABLE IF NOT EXISTS processes (
+    process TEXT PRIMARY KEY,
+    display_order INTEGER NULL,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS works (
     work_id TEXT PRIMARY KEY,
     model TEXT NOT NULL,
@@ -54,6 +65,7 @@ CREATE TABLE IF NOT EXISTS segments (
 );
 
 CREATE INDEX IF NOT EXISTS ix_segments_work_recorded ON segments(work_id, recorded_at);
+CREATE INDEX IF NOT EXISTS ix_processes_is_active ON processes(is_active);
 ";
 
         await conn.ExecuteAsync(new CommandDefinition(sql, cancellationToken: ct));
@@ -61,7 +73,56 @@ CREATE INDEX IF NOT EXISTS ix_segments_work_recorded ON segments(work_id, record
         // Minimal migration for older installs.
         await conn.ExecuteAsync(new CommandDefinition("ALTER TABLE segments ADD COLUMN IF NOT EXISTS adls_path TEXT NULL", cancellationToken: ct));
         await conn.ExecuteAsync(new CommandDefinition("ALTER TABLE segments ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ NULL", cancellationToken: ct));
+
+        await conn.ExecuteAsync(new CommandDefinition("ALTER TABLE processes ADD COLUMN IF NOT EXISTS display_order INTEGER NULL", cancellationToken: ct));
+        await conn.ExecuteAsync(new CommandDefinition("ALTER TABLE processes ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE", cancellationToken: ct));
+        await conn.ExecuteAsync(new CommandDefinition("ALTER TABLE processes ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()", cancellationToken: ct));
+        await conn.ExecuteAsync(new CommandDefinition("ALTER TABLE processes ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()", cancellationToken: ct));
+
+        // Backfill: if older installs relied on works.process distinct, import them into the master table.
+        await conn.ExecuteAsync(new CommandDefinition(@"
+    INSERT INTO processes (process, created_at, updated_at)
+    SELECT DISTINCT w.process, NOW(), NOW()
+    FROM works w
+    WHERE w.process IS NOT NULL AND btrim(w.process) <> ''
+    ON CONFLICT (process) DO NOTHING;
+    ", cancellationToken: ct));
+
+        await SeedTestDataAsync(conn, ct);
+
         logger.LogInformation("PostgreSQL schema ensured");
+    }
+
+    private async Task SeedTestDataAsync(NpgsqlConnection conn, CancellationToken ct)
+    {
+        if (!testData.Enabled) return;
+
+        var processes = (testData.Processes ?? Array.Empty<string>())
+            .Select(p => (p ?? string.Empty).Trim())
+            .Where(p => !string.IsNullOrWhiteSpace(p))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        if (processes.Length == 0)
+        {
+            processes = new[] { "工程A", "工程B", "工程C" };
+        }
+
+        const string upsertSql = @"
+INSERT INTO processes (process, display_order, is_active, created_at, updated_at)
+VALUES (@process, @displayOrder, TRUE, NOW(), NOW())
+ON CONFLICT (process) DO UPDATE SET
+  display_order = EXCLUDED.display_order,
+  is_active = TRUE,
+  updated_at = NOW();
+";
+
+        for (var i = 0; i < processes.Length; i++)
+        {
+            await conn.ExecuteAsync(new CommandDefinition(upsertSql, new { process = processes[i], displayOrder = i + 1 }, cancellationToken: ct));
+        }
+
+        logger.LogInformation("Seeded test processes: {Count}", processes.Length);
     }
 
     public async Task<Segment?> FindSegmentAsync(Guid segmentId, CancellationToken ct)
@@ -174,7 +235,7 @@ RETURNING segment_id, created_at;";
     public async Task<IReadOnlyList<string>> GetProcessesAsync(CancellationToken ct)
     {
         await using var conn = new NpgsqlConnection(connectionString);
-        const string sql = "SELECT DISTINCT process FROM works";
+        const string sql = @"SELECT process FROM processes WHERE is_active = TRUE ORDER BY COALESCE(display_order, 2147483647), process";
         var rows = await conn.QueryAsync<string>(new CommandDefinition(sql, cancellationToken: ct));
         return rows.ToArray();
     }

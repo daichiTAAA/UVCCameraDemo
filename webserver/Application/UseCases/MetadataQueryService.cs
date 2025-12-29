@@ -8,11 +8,18 @@ public sealed class MetadataQueryService(IMetadataStorePort store) : IMetadataQu
     public async Task<IReadOnlyList<ProcessInfo>> GetProcessesAsync(CancellationToken ct)
     {
         var processes = await store.GetProcessesAsync(ct);
-        return processes.Distinct(StringComparer.OrdinalIgnoreCase)
-            .Where(p => !string.IsNullOrWhiteSpace(p))
-            .OrderBy(p => p, StringComparer.OrdinalIgnoreCase)
-            .Select(p => new ProcessInfo(p))
-            .ToArray();
+        // Preserve the source order (e.g. display_order from DB) while de-duplicating.
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var list = new List<ProcessInfo>(processes.Count);
+        foreach (var raw in processes)
+        {
+            var process = raw?.Trim();
+            if (string.IsNullOrWhiteSpace(process)) continue;
+            if (!seen.Add(process)) continue;
+            list.Add(new ProcessInfo(process));
+        }
+
+        return list;
     }
 
     public async Task<IReadOnlyList<WorkSummary>> SearchWorksAsync(WorkSearchQuery query, CancellationToken ct)

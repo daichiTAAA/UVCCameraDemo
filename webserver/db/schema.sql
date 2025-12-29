@@ -1,4 +1,12 @@
 -- PostgreSQL schema for WebServer
+CREATE TABLE IF NOT EXISTS processes (
+    process TEXT PRIMARY KEY,
+    display_order INTEGER NULL,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS works (
     work_id TEXT PRIMARY KEY,
     model TEXT NOT NULL,
@@ -29,3 +37,4 @@ CREATE TABLE IF NOT EXISTS segments (
 );
 
 CREATE INDEX IF NOT EXISTS ix_segments_work_recorded ON segments(work_id, recorded_at);
+CREATE INDEX IF NOT EXISTS ix_processes_is_active ON processes(is_active);
