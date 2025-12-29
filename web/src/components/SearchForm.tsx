@@ -34,11 +34,7 @@ export function SearchForm({
     <form className="card search-card" onSubmit={handleSubmit}>
       <div className="card-head">
         <div>
-          <p className="eyebrow">検索</p>
-          <h2>作業を探す</h2>
-          <p className="muted">
-            workId / 型式 / 機番 / 工程 / 日付範囲を指定できます。
-          </p>
+          <h2>作業動画を探す</h2>
         </div>
         <div className="actions">
           <button
@@ -56,15 +52,6 @@ export function SearchForm({
       </div>
 
       <div className="grid fields">
-        <label className="field">
-          <span>作業ID (workId)</span>
-          <input
-            name="workId"
-            placeholder="完全一致"
-            value={filters.workId ?? ""}
-            onChange={update("workId")}
-          />
-        </label>
         <label className="field">
           <span>型式 (model)</span>
           <input

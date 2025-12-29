@@ -37,21 +37,6 @@ function WorkListPage() {
 
   return (
     <div className="page">
-      <div className="hero">
-        <div>
-          <p className="eyebrow">セグメント検索</p>
-          <h1>作業単位で録画を探す</h1>
-          <p className="muted">
-            LAN内サーバーにアップロードされた録画セグメントを workId / 型式 /
-            機番 / 工程 / 日付で検索します。
-          </p>
-        </div>
-        <div className="stat">
-          <p className="label">現在の件数</p>
-          <p className="stat-number">{works.length}</p>
-        </div>
-      </div>
-
       <SearchForm
         initialFilters={defaultFilters}
         onSearch={runSearch}
@@ -60,7 +45,8 @@ function WorkListPage() {
 
       <div className="card list-card">
         <div className="card-head">
-          <h2>作業一覧</h2>
+          <h2>作業動画一覧</h2>
+          <span className="pill">{works.length} 件</span>
           {loading && <span className="pill">読み込み中</span>}
           {error && <span className="pill danger">エラー</span>}
         </div>

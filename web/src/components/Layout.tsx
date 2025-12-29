@@ -11,7 +11,7 @@ export function Layout({ children }: LayoutProps) {
       <header className="app-header">
         <div className="app-header-inner">
           <Link to="/" className="brand">
-            Segment Browser
+            作業映像ポータル
           </Link>
           <nav className="nav-links">
             <NavLink
@@ -20,17 +20,12 @@ export function Layout({ children }: LayoutProps) {
                 isActive ? "nav-link active" : "nav-link"
               }
             >
-              作業一覧
+              作業動画一覧
             </NavLink>
           </nav>
         </div>
       </header>
       <main className="app-main">{children}</main>
-      <footer className="app-footer">
-        <div className="app-footer-inner">
-          <span>LAN内向け最小UI / React + Vite</span>
-        </div>
-      </footer>
     </div>
   );
 }
