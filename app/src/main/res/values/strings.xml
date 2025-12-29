@@ -13,7 +13,9 @@
     <string name="label_work">作業</string>
     <string name="label_work_status">作業状態: %1$s</string>
     <string name="label_work_id">作業ID: %1$s</string>
+    <string name="label_work_unassigned">作業ID: 未割当</string>
     <string name="label_work_info">型式 %1$s / 機番 %2$s / 工程 %3$s</string>
+    <string name="label_segment_index">セグメント: %1$d</string>
     <string name="label_qr_status">QR: %1$s</string>
     <string name="label_qr_unscanned">未読み取り</string>
     <string name="label_process">工程</string>

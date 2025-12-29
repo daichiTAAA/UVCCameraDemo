@@ -1653,6 +1653,38 @@ private fun RecordingListScreen(
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
+                                val workLabel = if (item.workId.isNullOrBlank()) {
+                                    stringResource(R.string.label_work_unassigned)
+                                } else {
+                                    stringResource(R.string.label_work_id, item.workId)
+                                }
+                                Text(
+                                    text = workLabel,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                if (item.segmentIndex != null) {
+                                    Text(
+                                        text = stringResource(R.string.label_segment_index, item.segmentIndex),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                if (!item.model.isNullOrBlank() &&
+                                    !item.serial.isNullOrBlank() &&
+                                    !item.process.isNullOrBlank()
+                                ) {
+                                    Text(
+                                        text = stringResource(
+                                            R.string.label_work_info,
+                                            item.model,
+                                            item.serial,
+                                            item.process
+                                        ),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
                                 Spacer(modifier = Modifier.height(10.dp))
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     Button(onClick = { onPlay(item) }, enabled = isPlayable) {

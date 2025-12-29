@@ -42,6 +42,21 @@ interface SegmentDao {
 
     @Query(
         """
+        SELECT segments.workId AS workId,
+               segments.segmentIndex AS segmentIndex,
+               works.model AS model,
+               works.serial AS serial,
+               works.process AS process
+        FROM segments
+        LEFT JOIN works ON segments.workId = works.workId
+        WHERE segments.path = :path
+        LIMIT 1
+        """
+    )
+    suspend fun findMetadataByPath(path: String): SegmentMetadata?
+
+    @Query(
+        """
         SELECT * FROM segments
         WHERE workId IS NOT NULL
             AND durationMs IS NOT NULL

@@ -15,6 +15,8 @@ android {
         (project.findProperty("uvcPreviewWidth") as String?)?.toIntOrNull() ?: 1920
     val uvcPreviewHeight =
         (project.findProperty("uvcPreviewHeight") as String?)?.toIntOrNull() ?: 1080
+    val envVars = loadEnvVars(rootProject.file(".env"))
+    val tusdUploadApiKey = envVars["TUSD_UPLOAD_API_KEY"] ?: ""
 
     defaultConfig {
         applicationId = "com.example.uvccamerademo"
@@ -26,6 +28,7 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("int", "DEFAULT_PREVIEW_WIDTH", uvcPreviewWidth.toString())
         buildConfigField("int", "DEFAULT_PREVIEW_HEIGHT", uvcPreviewHeight.toString())
+        buildConfigField("String", "TUSD_UPLOAD_API_KEY", "\"${escapeForBuildConfig(tusdUploadApiKey)}\"")
     }
 
     buildTypes {
@@ -48,6 +51,30 @@ android {
         compose = true
         buildConfig = true
     }
+}
+
+fun loadEnvVars(envFile: File): Map<String, String> {
+    if (!envFile.exists()) {
+        return emptyMap()
+    }
+    return envFile.readLines()
+        .map { it.trim() }
+        .filter { it.isNotEmpty() && !it.startsWith("#") && it.contains("=") }
+        .associate { line ->
+            val index = line.indexOf('=')
+            val key = line.substring(0, index).trim()
+            var value = line.substring(index + 1).trim()
+            if (value.length >= 2 && value.first() == '"' && value.last() == '"') {
+                value = value.substring(1, value.length - 1)
+            }
+            key to value
+        }
+}
+
+fun escapeForBuildConfig(value: String): String {
+    return value
+        .replace("\\", "\\\\")
+        .replace("\"", "\\\"")
 }
 
 configurations.configureEach {

@@ -21,7 +21,12 @@ data class RecordingItem(
     val name: String,
     val createdAt: Long,
     val sizeBytes: Long,
-    val durationMs: Long
+    val durationMs: Long,
+    val workId: String? = null,
+    val segmentIndex: Int? = null,
+    val model: String? = null,
+    val serial: String? = null,
+    val process: String? = null
 )
 
 class RecordingRepository(context: Context) {
@@ -126,7 +131,9 @@ class RecordingRepository(context: Context) {
 
         files
             .map { file ->
-                buildItem(normalizeExtension(file))
+                val normalized = normalizeExtension(file)
+                val metadata = segmentDao.findMetadataByPath(normalized.absolutePath)
+                buildItem(normalized, metadata)
             }
             .sortedByDescending { it.createdAt }
     }
@@ -136,17 +143,17 @@ class RecordingRepository(context: Context) {
         if (shouldWaitForFinalize(normalized)) {
             waitForStableFile(normalized)
         }
-        buildItem(preparePlaybackFile(normalized))
+        buildItem(preparePlaybackFile(normalized), metadataFromItem(item))
     }
 
     suspend fun forceVideoOnlyRepair(item: RecordingItem): RecordingItem? = withContext(Dispatchers.IO) {
         val normalized = normalizeExtension(File(item.path))
         val playbackCopy = playbackCopyFor(normalized) ?: return@withContext null
         if (playbackCopy.exists() && playbackCopy.lastModified() >= normalized.lastModified()) {
-            return@withContext buildItem(playbackCopy)
+            return@withContext buildItem(playbackCopy, metadataFromItem(item))
         }
         if (remuxVideoOnly(normalized, playbackCopy)) {
-            return@withContext buildItem(playbackCopy)
+            return@withContext buildItem(playbackCopy, metadataFromItem(item))
         }
         playbackCopy.delete()
         null
@@ -165,13 +172,36 @@ class RecordingRepository(context: Context) {
         return dir
     }
 
-    private fun buildItem(file: File): RecordingItem {
+    private fun buildItem(file: File, metadata: SegmentMetadata?): RecordingItem {
         return RecordingItem(
             path = file.absolutePath,
             name = file.name,
             createdAt = file.lastModified(),
             sizeBytes = file.length(),
-            durationMs = readDurationMs(file)
+            durationMs = readDurationMs(file),
+            workId = metadata?.workId,
+            segmentIndex = metadata?.segmentIndex,
+            model = metadata?.model,
+            serial = metadata?.serial,
+            process = metadata?.process
+        )
+    }
+
+    private fun metadataFromItem(item: RecordingItem): SegmentMetadata? {
+        if (item.workId == null &&
+            item.segmentIndex == null &&
+            item.model == null &&
+            item.serial == null &&
+            item.process == null
+        ) {
+            return null
+        }
+        return SegmentMetadata(
+            workId = item.workId,
+            segmentIndex = item.segmentIndex,
+            model = item.model,
+            serial = item.serial,
+            process = item.process
         )
     }
 

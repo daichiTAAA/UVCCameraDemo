@@ -50,3 +50,11 @@ data class SegmentEntity(
     val uploadCompletedAt: Long?,
     val uploadRetryCount: Int
 )
+
+data class SegmentMetadata(
+    val workId: String?,
+    val segmentIndex: Int?,
+    val model: String?,
+    val serial: String?,
+    val process: String?
+)

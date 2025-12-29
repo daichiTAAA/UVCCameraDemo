@@ -344,6 +344,9 @@ class UploadWorker(
                 throw e
             }
         }
+        if (BuildConfig.TUSD_UPLOAD_API_KEY.isNotBlank()) {
+            connection.setRequestProperty("X-Api-Key", BuildConfig.TUSD_UPLOAD_API_KEY)
+        }
         connection.connectTimeout = CONNECT_TIMEOUT_MS
         connection.readTimeout = READ_TIMEOUT_MS
         connection.useCaches = false
