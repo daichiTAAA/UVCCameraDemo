@@ -11,6 +11,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.nio.ByteBuffer
+import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -25,6 +26,77 @@ data class RecordingItem(
 
 class RecordingRepository(context: Context) {
     private val appContext = context.applicationContext
+    private val database = AppDatabase.getInstance(appContext)
+    private val workDao = database.workDao()
+    private val segmentDao = database.segmentDao()
+
+    suspend fun createWork(
+        model: String,
+        serial: String,
+        process: String,
+        startedAt: Long
+    ): WorkEntity = withContext(Dispatchers.IO) {
+        val work = WorkEntity(
+            workId = UUID.randomUUID().toString(),
+            model = model,
+            serial = serial,
+            process = process,
+            state = WorkState.ACTIVE,
+            startedAt = startedAt,
+            endedAt = null
+        )
+        workDao.insert(work)
+        work
+    }
+
+    suspend fun updateWorkState(workId: String, state: WorkState, endedAt: Long?) {
+        withContext(Dispatchers.IO) {
+            workDao.updateState(workId, state, endedAt)
+        }
+    }
+
+    suspend fun insertSegment(
+        segmentUuid: String,
+        path: String,
+        recordedAt: Long,
+        workId: String?
+    ): SegmentEntity = withContext(Dispatchers.IO) {
+        val segmentIndex = if (workId != null) {
+            (segmentDao.maxSegmentIndex(workId) ?: 0) + 1
+        } else {
+            null
+        }
+        val segment = SegmentEntity(
+            segmentUuid = segmentUuid,
+            path = path,
+            recordedAt = recordedAt,
+            durationMs = null,
+            sizeBytes = null,
+            workId = workId,
+            segmentIndex = segmentIndex,
+            uploadState = UploadState.NONE,
+            uploadRemoteId = null,
+            uploadBytesSent = 0L,
+            uploadCompletedAt = null
+        )
+        segmentDao.insert(segment)
+        segment
+    }
+
+    suspend fun deleteSegment(segmentUuid: String) {
+        withContext(Dispatchers.IO) {
+            segmentDao.deleteById(segmentUuid)
+        }
+    }
+
+    suspend fun finalizeSegment(segmentUuid: String, path: String) {
+        withContext(Dispatchers.IO) {
+            val file = File(path)
+            val durationMs = readDurationMs(file)
+            val sizeBytes = file.length()
+            segmentDao.updateFinalized(segmentUuid, durationMs, sizeBytes)
+        }
+    }
 
     fun createRecordingFile(): File? {
         val dir = getRecordingDir() ?: return null

@@ -18,6 +18,9 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -28,6 +31,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -40,6 +44,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -61,11 +66,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -93,6 +101,7 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.UUID
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -118,6 +127,18 @@ private sealed interface Screen {
 
 internal data class ResolutionOption(val width: Int, val height: Int)
 
+enum class WorkUiState {
+    NONE,
+    ACTIVE,
+    PAUSED
+}
+
+data class WorkInfo(
+    val model: String,
+    val serial: String,
+    val process: String
+)
+
 @Composable
 private fun MainContent() {
     val context = LocalContext.current
@@ -125,7 +146,8 @@ private fun MainContent() {
     val window = (context as? Activity)?.window
     val repository = remember { RecordingRepository(context) }
     var screen by remember { mutableStateOf<Screen>(Screen.Preview) }
-    val isRecordingState = remember { mutableStateOf(false) }
+    val isRecordingSessionState = remember { mutableStateOf(false) }
+    val isSegmentRecordingState = remember { mutableStateOf(false) }
     val isFinalizingState = remember { mutableStateOf(false) }
     val recordingPathState = remember { mutableStateOf<String?>(null) }
 
@@ -148,7 +170,8 @@ private fun MainContent() {
                 modifier = Modifier.fillMaxSize(),
                 recordingRepository = repository,
                 onOpenRecordings = { screen = Screen.Recordings },
-                isRecordingState = isRecordingState,
+                isRecordingSessionState = isRecordingSessionState,
+                isSegmentRecordingState = isSegmentRecordingState,
                 isFinalizingState = isFinalizingState,
                 recordingPathState = recordingPathState
             )
@@ -160,7 +183,7 @@ private fun MainContent() {
                     onBack = { screen = Screen.Preview },
                     onPlay = { item -> screen = Screen.Playback(item) },
                     recordingPath = recordingPathState.value,
-                    isRecording = isRecordingState.value,
+                    isSegmentRecording = isSegmentRecordingState.value,
                     isFinalizing = isFinalizingState.value
                 )
                 is Screen.Playback -> PlaybackScreen(
@@ -169,7 +192,7 @@ private fun MainContent() {
                     item = current.item,
                     onBack = { screen = Screen.Recordings },
                     recordingPath = recordingPathState.value,
-                    isRecording = isRecordingState.value,
+                    isSegmentRecording = isSegmentRecordingState.value,
                     isFinalizing = isFinalizingState.value
                 )
             }
@@ -182,7 +205,8 @@ private fun UvcPreviewScreen(
     modifier: Modifier = Modifier,
     recordingRepository: RecordingRepository,
     onOpenRecordings: () -> Unit,
-    isRecordingState: MutableState<Boolean>,
+    isRecordingSessionState: MutableState<Boolean>,
+    isSegmentRecordingState: MutableState<Boolean>,
     isFinalizingState: MutableState<Boolean>,
     recordingPathState: MutableState<String?>
 ) {
@@ -190,6 +214,7 @@ private fun UvcPreviewScreen(
     val isPreview = LocalInspectionMode.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
+    val scope = rememberCoroutineScope()
 
     val cameraView = remember {
         if (isPreview) {
@@ -236,7 +261,8 @@ private fun UvcPreviewScreen(
         mutableStateOf(if (isPreview) previewStatus else idleStatus)
     }
     var isCameraOpened by remember { mutableStateOf(false) }
-    var isRecording by isRecordingState
+    var isRecordingSession by isRecordingSessionState
+    var isSegmentRecording by isSegmentRecordingState
     var isFinalizing by isFinalizingState
     var currentRecordingPath by recordingPathState
     var recordingStartAt by remember { mutableStateOf<Long?>(null) }
@@ -244,6 +270,25 @@ private fun UvcPreviewScreen(
     var pendingOpen by remember { mutableStateOf(false) }
     var pendingRecord by remember { mutableStateOf(false) }
     var recorder by remember { mutableStateOf<HevcRecorder?>(null) }
+    var currentSegmentUuid by remember { mutableStateOf<String?>(null) }
+    var pendingSegmentWorkId by remember { mutableStateOf<String?>(null) }
+    var workState by remember { mutableStateOf(WorkUiState.NONE) }
+    var currentWorkId by remember { mutableStateOf<String?>(null) }
+    var activeWorkInfo by remember { mutableStateOf<WorkInfo?>(null) }
+    var workMessage by remember { mutableStateOf<String?>(null) }
+    var qrModel by rememberSaveable { mutableStateOf<String?>(null) }
+    var qrSerial by rememberSaveable { mutableStateOf<String?>(null) }
+    var qrMessage by remember { mutableStateOf<String?>(null) }
+    var showQrScanner by remember { mutableStateOf(false) }
+
+    val processRepository = remember { ProcessRepository(context) }
+    var processItems by remember { mutableStateOf<List<ProcessItem>>(emptyList()) }
+    var processSource by remember { mutableStateOf(ProcessSource.NONE) }
+    var selectedProcess by remember { mutableStateOf<ProcessItem?>(null) }
+    var processMessage by remember { mutableStateOf<String?>(null) }
+    var processApiUrl by rememberSaveable { mutableStateOf("") }
+    var showProcessDialog by remember { mutableStateOf(false) }
+    val unknownProcess = remember { ProcessItem(id = "UNKNOWN", name = "UNKNOWN") }
 
     val previewRotation = 0f
     val previewAspectRatio =
@@ -294,37 +339,47 @@ private fun UvcPreviewScreen(
         }
     }
 
-    fun stopRecording() {
-        if (isRecording) {
+    fun stopSegment() {
+        if (isSegmentRecording) {
+            isSegmentRecording = false
             recorder?.stop()
             isFinalizing = true
             statusMessage = context.getString(R.string.status_record_stopping)
         }
     }
 
-    val startRecording = startRecording@{
+    fun startSegment(workId: String?) {
         if (isPreview) {
             statusMessage = context.getString(R.string.status_preview_record_disabled)
-            return@startRecording
+            isRecordingSession = false
+            pendingSegmentWorkId = null
+            return
         }
         if (!isCameraOpened) {
             statusMessage = context.getString(R.string.status_open_camera_first)
-            return@startRecording
+            isRecordingSession = false
+            pendingSegmentWorkId = null
+            return
         }
         val file = recordingRepository.createRecordingFile()
         if (file == null) {
             statusMessage = context.getString(R.string.status_storage_unavailable)
-            return@startRecording
+            isRecordingSession = false
+            pendingSegmentWorkId = null
+            return
         }
+        val segmentUuid = UUID.randomUUID().toString()
+        val recordedAt = System.currentTimeMillis()
         isFinalizing = false
         currentRecordingPath = file.absolutePath
+        currentSegmentUuid = segmentUuid
         var createdRecorder: HevcRecorder? = null
         val callback = object : ICaptureCallBack {
             override fun onBegin() {
                 mainHandler.post {
-                    recordingStartAt = System.currentTimeMillis()
+                    recordingStartAt = recordedAt
                     recordingElapsedMs = 0L
-                    isRecording = true
+                    isSegmentRecording = true
                     statusMessage = if (createdRecorder?.isAudioEnabled == true) {
                         context.getString(R.string.status_recording)
                     } else {
@@ -334,30 +389,56 @@ private fun UvcPreviewScreen(
             }
 
             override fun onError(error: String?) {
+                val failedUuid = currentSegmentUuid
+                val failedPath = currentRecordingPath
                 mainHandler.post {
-                    isRecording = false
+                    isRecordingSession = false
+                    isSegmentRecording = false
                     recordingStartAt = null
                     isFinalizing = false
                     recorder = null
                     currentRecordingPath = null
+                    currentSegmentUuid = null
+                    pendingSegmentWorkId = null
                     statusMessage = context.getString(
                         R.string.status_recording_failed,
                         error ?: context.getString(R.string.error_unknown)
                     )
                 }
+                if (failedUuid != null && failedPath != null) {
+                    scope.launch {
+                        recordingRepository.finalizeSegment(failedUuid, failedPath)
+                    }
+                }
             }
 
             override fun onComplete(path: String?) {
+                val finishedUuid = currentSegmentUuid
+                val finishedPath = path ?: currentRecordingPath
                 mainHandler.post {
-                    isRecording = false
+                    isSegmentRecording = false
                     recordingStartAt = null
                     isFinalizing = false
                     recorder = null
                     currentRecordingPath = null
+                    currentSegmentUuid = null
                     statusMessage = context.getString(
                         R.string.status_saved,
-                        path ?: context.getString(R.string.label_unknown_path)
+                        finishedPath ?: context.getString(R.string.label_unknown_path)
                     )
+                    if (isRecordingSession) {
+                        val nextWorkId = pendingSegmentWorkId
+                            ?: if (workState == WorkUiState.ACTIVE) currentWorkId else null
+                        pendingSegmentWorkId = null
+                        startSegment(nextWorkId)
+                    } else {
+                        pendingSegmentWorkId = null
+                    }
+                }
+                if (finishedUuid != null && finishedPath != null) {
+                    scope.launch {
+                        recordingRepository.finalizeSegment(finishedUuid, finishedPath)
+                    }
                 }
             }
         }
@@ -371,9 +452,172 @@ private fun UvcPreviewScreen(
         if (!createdRecorder.start()) {
             statusMessage = context.getString(R.string.status_record_start_failed)
             currentRecordingPath = null
-            return@startRecording
+            currentSegmentUuid = null
+            isRecordingSession = false
+            pendingSegmentWorkId = null
+            return
         }
+        isSegmentRecording = true
+        recordingElapsedMs = 0L
         recorder = createdRecorder
+        scope.launch {
+            recordingRepository.insertSegment(segmentUuid, file.absolutePath, recordedAt, workId)
+        }
+    }
+
+    fun startRecordingSession() {
+        if (isRecordingSession) {
+            return
+        }
+        isRecordingSession = true
+        pendingSegmentWorkId = if (workState == WorkUiState.ACTIVE) currentWorkId else null
+        if (!isSegmentRecording && !isFinalizing) {
+            startSegment(pendingSegmentWorkId)
+        }
+    }
+
+    fun stopRecordingSession() {
+        if (!isRecordingSession) {
+            return
+        }
+        isRecordingSession = false
+        pendingSegmentWorkId = null
+        if (isSegmentRecording) {
+            stopSegment()
+        }
+    }
+
+    fun requestSegmentBoundary(nextWorkId: String?) {
+        pendingSegmentWorkId = nextWorkId
+        if (!isRecordingSession) {
+            return
+        }
+        if (isSegmentRecording) {
+            stopSegment()
+        } else if (!isFinalizing) {
+            startSegment(nextWorkId)
+        }
+    }
+
+    fun applyProcessItems(items: List<ProcessItem>, source: ProcessSource, message: String?) {
+        processItems = items
+        processSource = source
+        processMessage = message
+        val selected = selectedProcess
+        if (selected != null && items.none { it.id == selected.id }) {
+            selectedProcess = null
+            scope.launch {
+                processRepository.saveSelectedProcess(null)
+            }
+            processMessage = context.getString(R.string.message_process_selection_invalid)
+        }
+    }
+
+    fun refreshProcesses() {
+        scope.launch {
+            val url = processApiUrl.trim()
+            if (url.isBlank()) {
+                processMessage = context.getString(R.string.message_process_api_url_required)
+                return@launch
+            }
+            processRepository.saveApiUrl(url)
+            val result = runCatching { processRepository.fetchProcesses(url) }
+            val items = result.getOrNull().orEmpty()
+            if (result.isSuccess && items.isNotEmpty()) {
+                processRepository.saveCachedProcesses(items)
+                applyProcessItems(
+                    items,
+                    ProcessSource.LIVE,
+                    context.getString(R.string.message_process_fetch_success)
+                )
+            } else {
+                val cache = processRepository.loadCachedProcesses()
+                if (cache != null && processRepository.isCacheValid(cache.fetchedAt) && cache.items.isNotEmpty()) {
+                    applyProcessItems(
+                        cache.items,
+                        ProcessSource.TEMPORARY,
+                        context.getString(R.string.message_process_fetch_failed_cache)
+                    )
+                } else {
+                    applyProcessItems(
+                        listOf(unknownProcess),
+                        ProcessSource.UNKNOWN_ONLY,
+                        context.getString(R.string.message_process_fetch_failed_unknown)
+                    )
+                }
+            }
+        }
+    }
+
+    fun handleStartWork() {
+        val model = qrModel?.trim().orEmpty()
+        val serial = qrSerial?.trim().orEmpty()
+        val process = selectedProcess?.name?.trim().orEmpty()
+        if (model.isBlank() || serial.isBlank()) {
+            workMessage = context.getString(R.string.message_work_qr_required)
+            return
+        }
+        if (selectedProcess == null || process.isBlank()) {
+            workMessage = context.getString(R.string.message_work_process_required)
+            return
+        }
+        workMessage = null
+        val startedAt = System.currentTimeMillis()
+        val previousWorkId = currentWorkId
+        val wasActive = workState != WorkUiState.NONE && previousWorkId != null
+        scope.launch {
+            if (wasActive) {
+                recordingRepository.updateWorkState(previousWorkId!!, WorkState.ENDED, startedAt)
+            }
+            val newWork = recordingRepository.createWork(model, serial, process, startedAt)
+            currentWorkId = newWork.workId
+            activeWorkInfo = WorkInfo(model = model, serial = serial, process = process)
+            workState = WorkUiState.ACTIVE
+            workMessage = context.getString(R.string.message_work_started)
+            requestSegmentBoundary(newWork.workId)
+        }
+    }
+
+    fun handlePauseWork() {
+        val workId = currentWorkId ?: return
+        if (workState != WorkUiState.ACTIVE) {
+            return
+        }
+        scope.launch {
+            recordingRepository.updateWorkState(workId, WorkState.PAUSED, null)
+            workState = WorkUiState.PAUSED
+            workMessage = context.getString(R.string.message_work_paused)
+            requestSegmentBoundary(null)
+        }
+    }
+
+    fun handleResumeWork() {
+        val workId = currentWorkId ?: return
+        if (workState != WorkUiState.PAUSED) {
+            return
+        }
+        scope.launch {
+            recordingRepository.updateWorkState(workId, WorkState.ACTIVE, null)
+            workState = WorkUiState.ACTIVE
+            workMessage = context.getString(R.string.message_work_resumed)
+            requestSegmentBoundary(workId)
+        }
+    }
+
+    fun handleEndWork() {
+        val workId = currentWorkId ?: return
+        if (workState == WorkUiState.NONE) {
+            return
+        }
+        val endedAt = System.currentTimeMillis()
+        scope.launch {
+            recordingRepository.updateWorkState(workId, WorkState.ENDED, endedAt)
+            workState = WorkUiState.NONE
+            currentWorkId = null
+            activeWorkInfo = null
+            workMessage = context.getString(R.string.message_work_ended)
+            requestSegmentBoundary(null)
+        }
     }
 
     val cameraPermissionLauncher = if (isPreview) {
@@ -400,7 +644,7 @@ private fun UvcPreviewScreen(
         ) { granted ->
             if (granted && pendingRecord) {
                 pendingRecord = false
-                startRecording()
+                startRecordingSession()
             } else if (!granted) {
                 pendingRecord = false
                 statusMessage = context.getString(R.string.status_audio_permission_required)
@@ -414,13 +658,13 @@ private fun UvcPreviewScreen(
                 when (event) {
                     Lifecycle.Event.ON_START -> cameraStrategy.register()
                     Lifecycle.Event.ON_STOP -> {
-                        if (!isRecording && !isFinalizing) {
+                        if (!isRecordingSession && !isFinalizing) {
                             cameraClient.closeCamera()
                             isCameraOpened = false
                         }
                     }
                     Lifecycle.Event.ON_DESTROY -> {
-                        if (!isRecording && !isFinalizing) {
+                        if (!isRecordingSession && !isFinalizing) {
                             cameraStrategy.unRegister()
                         }
                     }
@@ -430,7 +674,7 @@ private fun UvcPreviewScreen(
             lifecycleOwner.lifecycle.addObserver(observer)
             onDispose {
                 lifecycleOwner.lifecycle.removeObserver(observer)
-                if (!isRecording && !isFinalizing) {
+                if (!isRecordingSession && !isFinalizing) {
                     cameraClient.closeCamera()
                     isCameraOpened = false
                     cameraStrategy.unRegister()
@@ -461,7 +705,7 @@ private fun UvcPreviewScreen(
                         if (selectedDeviceId == device.deviceId.toString()) {
                             selectedDeviceId = null
                         }
-                        stopRecording()
+                        stopRecordingSession()
                         cameraClient.closeCamera()
                         isCameraOpened = false
                         refreshDevices()
@@ -492,7 +736,7 @@ private fun UvcPreviewScreen(
                             R.string.status_device_disconnected,
                             device.deviceName
                         )
-                        stopRecording()
+                        stopRecordingSession()
                         isCameraOpened = false
                     }
                 }
@@ -521,9 +765,25 @@ private fun UvcPreviewScreen(
         }
     }
 
-    LaunchedEffect(isRecording, recordingStartAt) {
-        if (isRecording && recordingStartAt != null) {
-            while (isRecording) {
+    LaunchedEffect(Unit) {
+        processApiUrl = processRepository.loadApiUrl()
+        selectedProcess = processRepository.loadSelectedProcess()
+        val cache = processRepository.loadCachedProcesses()
+        if (cache != null && processRepository.isCacheValid(cache.fetchedAt) && cache.items.isNotEmpty()) {
+            processItems = cache.items
+            processSource = ProcessSource.CACHE
+        }
+        val selected = selectedProcess
+        if (selected != null && processItems.isNotEmpty() && processItems.none { it.id == selected.id }) {
+            selectedProcess = null
+            processRepository.saveSelectedProcess(null)
+            processMessage = context.getString(R.string.message_process_selection_invalid)
+        }
+    }
+
+    LaunchedEffect(isSegmentRecording, recordingStartAt) {
+        if (isSegmentRecording && recordingStartAt != null) {
+            while (isSegmentRecording) {
                 recordingElapsedMs = System.currentTimeMillis() - (recordingStartAt ?: 0L)
                 delay(1000L)
             }
@@ -550,7 +810,7 @@ private fun UvcPreviewScreen(
     }
 
     fun handleClose() {
-        stopRecording()
+        stopRecordingSession()
         cameraClient?.closeCamera()
         isCameraOpened = false
         statusMessage = context.getString(R.string.status_closed)
@@ -561,8 +821,8 @@ private fun UvcPreviewScreen(
             statusMessage = context.getString(R.string.status_preview_record_disabled)
             return
         }
-        if (isRecording) {
-            stopRecording()
+        if (isRecordingSession) {
+            stopRecordingSession()
             return
         }
         val hasRecordPermission = ContextCompat.checkSelfPermission(
@@ -570,7 +830,7 @@ private fun UvcPreviewScreen(
             Manifest.permission.RECORD_AUDIO
         ) == PackageManager.PERMISSION_GRANTED
         if (hasRecordPermission) {
-            startRecording()
+            startRecordingSession()
         } else {
             pendingRecord = true
             recordPermissionLauncher?.launch(Manifest.permission.RECORD_AUDIO)
@@ -597,21 +857,108 @@ private fun UvcPreviewScreen(
         }
     }
 
-    UvcPreviewScreenContent(
-        modifier = modifier,
-        previewAspectRatio = previewAspectRatio,
-        statusMessage = statusMessage,
-        isCameraOpened = isCameraOpened,
-        isRecording = isRecording,
-        isFinalizing = isFinalizing,
-        recordingElapsedMs = recordingElapsedMs,
-        selectedResolution = selectedResolution,
-        onOpen = { handleOpen() },
-        onClose = { handleClose() },
-        onToggleRecord = { handleToggleRecord() },
-        onOpenRecordings = onOpenRecordings,
-        previewContent = previewContent
-    )
+    val canStartWork =
+        !qrModel.isNullOrBlank() && !qrSerial.isNullOrBlank() && selectedProcess != null
+
+    if (showProcessDialog) {
+        AlertDialog(
+            onDismissRequest = { showProcessDialog = false },
+            title = { Text(stringResource(R.string.dialog_process_select_title)) },
+            text = {
+                if (processItems.isEmpty()) {
+                    Text(stringResource(R.string.label_process_empty))
+                } else {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 300.dp)
+                            .verticalScroll(rememberScrollState())
+                    ) {
+                        processItems.forEach { item ->
+                            TextButton(
+                                onClick = {
+                                    selectedProcess = item
+                                    scope.launch {
+                                        processRepository.saveSelectedProcess(item)
+                                    }
+                                    processMessage = null
+                                    showProcessDialog = false
+                                }
+                            ) {
+                                Text("${item.id} ${item.name}")
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showProcessDialog = false }) {
+                    Text(stringResource(R.string.action_close))
+                }
+            }
+        )
+    }
+
+    Box(modifier = modifier.fillMaxSize()) {
+        UvcPreviewScreenContent(
+            modifier = Modifier.fillMaxSize(),
+            previewAspectRatio = previewAspectRatio,
+            statusMessage = statusMessage,
+            isCameraOpened = isCameraOpened,
+            isRecordingSession = isRecordingSession,
+            isSegmentRecording = isSegmentRecording,
+            isFinalizing = isFinalizing,
+            recordingElapsedMs = recordingElapsedMs,
+            selectedResolution = selectedResolution,
+            workState = workState,
+            currentWorkId = currentWorkId,
+            activeWorkInfo = activeWorkInfo,
+            qrModel = qrModel,
+            qrSerial = qrSerial,
+            qrMessage = qrMessage,
+            onScanQr = { showQrScanner = true },
+            onClearQr = {
+                qrModel = null
+                qrSerial = null
+                qrMessage = context.getString(R.string.message_qr_cleared)
+            },
+            processSource = processSource,
+            selectedProcess = selectedProcess,
+            processMessage = processMessage,
+            processApiUrl = processApiUrl,
+            onProcessApiUrlChange = { processApiUrl = it },
+            onFetchProcesses = { refreshProcesses() },
+            onSelectProcess = { showProcessDialog = true },
+            onWorkStart = { handleStartWork() },
+            onWorkPause = { handlePauseWork() },
+            onWorkResume = { handleResumeWork() },
+            onWorkEnd = { handleEndWork() },
+            canStartWork = canStartWork,
+            workMessage = workMessage,
+            onOpen = { handleOpen() },
+            onClose = { handleClose() },
+            onToggleRecord = { handleToggleRecord() },
+            onOpenRecordings = onOpenRecordings,
+            previewContent = previewContent
+        )
+
+        if (showQrScanner) {
+            QrScannerOverlay(
+                onDismiss = { showQrScanner = false },
+                onScanned = { raw ->
+                    val parsed = parseQrPayload(raw)
+                    if (parsed == null) {
+                        qrMessage = context.getString(R.string.message_qr_parse_failed)
+                    } else {
+                        qrModel = parsed.model
+                        qrSerial = parsed.serial
+                        qrMessage = context.getString(R.string.message_qr_scanned)
+                    }
+                    showQrScanner = false
+                }
+            )
+        }
+    }
 }
 
 @Composable
@@ -620,10 +967,32 @@ internal fun UvcPreviewScreenContent(
     previewAspectRatio: Float,
     statusMessage: String,
     isCameraOpened: Boolean,
-    isRecording: Boolean,
+    isRecordingSession: Boolean,
+    isSegmentRecording: Boolean,
     isFinalizing: Boolean,
     recordingElapsedMs: Long,
     selectedResolution: ResolutionOption,
+    workState: WorkUiState,
+    currentWorkId: String?,
+    activeWorkInfo: WorkInfo?,
+    qrModel: String?,
+    qrSerial: String?,
+    qrMessage: String?,
+    onScanQr: () -> Unit,
+    onClearQr: () -> Unit,
+    processSource: ProcessSource,
+    selectedProcess: ProcessItem?,
+    processMessage: String?,
+    processApiUrl: String,
+    onProcessApiUrlChange: (String) -> Unit,
+    onFetchProcesses: () -> Unit,
+    onSelectProcess: () -> Unit,
+    onWorkStart: () -> Unit,
+    onWorkPause: () -> Unit,
+    onWorkResume: () -> Unit,
+    onWorkEnd: () -> Unit,
+    canStartWork: Boolean,
+    workMessage: String?,
     onOpen: () -> Unit,
     onClose: () -> Unit,
     onToggleRecord: () -> Unit,
@@ -641,10 +1010,11 @@ internal fun UvcPreviewScreenContent(
     )
     val recordLabel = when {
         isFinalizing -> stringResource(R.string.pill_record_finalizing)
-        isRecording -> stringResource(
+        isSegmentRecording -> stringResource(
             R.string.pill_recording_with_time,
             formatDuration(recordingElapsedMs)
         )
+        isRecordingSession -> stringResource(R.string.status_recording)
         else -> stringResource(R.string.status_idle)
     }
     val selectedResolutionLabel = stringResource(
@@ -662,17 +1032,17 @@ internal fun UvcPreviewScreenContent(
     } else {
         MaterialTheme.colorScheme.onSurfaceVariant
     }
-    val recordContainer = if (isRecording || isFinalizing) {
+    val recordContainer = if (isRecordingSession || isFinalizing) {
         MaterialTheme.colorScheme.errorContainer
     } else {
         MaterialTheme.colorScheme.secondaryContainer
     }
-    val recordContent = if (isRecording || isFinalizing) {
+    val recordContent = if (isRecordingSession || isFinalizing) {
         MaterialTheme.colorScheme.onErrorContainer
     } else {
         MaterialTheme.colorScheme.onSecondaryContainer
     }
-    val recordButtonColors = if (isRecording) {
+    val recordButtonColors = if (isRecordingSession) {
         ButtonDefaults.buttonColors(
             containerColor = MaterialTheme.colorScheme.error,
             contentColor = MaterialTheme.colorScheme.onError
@@ -680,11 +1050,15 @@ internal fun UvcPreviewScreenContent(
     } else {
         ButtonDefaults.buttonColors()
     }
+    val focusManager = LocalFocusManager.current
 
     Box(
         modifier = modifier
             .fillMaxSize()
             .background(backgroundBrush)
+            .pointerInput(Unit) {
+                detectTapGestures(onTap = { focusManager.clearFocus() })
+            }
     ) {
         Column(
             modifier = Modifier
@@ -714,6 +1088,13 @@ internal fun UvcPreviewScreenContent(
                             text = stringResource(R.string.label_record_status, recordLabel),
                             containerColor = recordContainer,
                             contentColor = recordContent
+                        )
+                    }
+                    if (statusMessage.isNotBlank()) {
+                        Text(
+                            text = statusMessage,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
@@ -750,6 +1131,226 @@ internal fun UvcPreviewScreenContent(
                 }
             }
 
+            val workStateLabel = when (workState) {
+                WorkUiState.NONE -> stringResource(R.string.pill_work_none)
+                WorkUiState.ACTIVE -> stringResource(R.string.pill_work_active)
+                WorkUiState.PAUSED -> stringResource(R.string.pill_work_paused)
+            }
+            val workContainer = when (workState) {
+                WorkUiState.ACTIVE -> MaterialTheme.colorScheme.primaryContainer
+                WorkUiState.PAUSED -> MaterialTheme.colorScheme.tertiaryContainer
+                WorkUiState.NONE -> MaterialTheme.colorScheme.surfaceVariant
+            }
+            val workContent = when (workState) {
+                WorkUiState.ACTIVE -> MaterialTheme.colorScheme.onPrimaryContainer
+                WorkUiState.PAUSED -> MaterialTheme.colorScheme.onTertiaryContainer
+                WorkUiState.NONE -> MaterialTheme.colorScheme.onSurfaceVariant
+            }
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text(
+                        text = stringResource(R.string.label_work),
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        StatusPill(
+                            text = stringResource(R.string.label_work_status, workStateLabel),
+                            containerColor = workContainer,
+                            contentColor = workContent
+                        )
+                    }
+                    if (currentWorkId != null) {
+                        Text(
+                            text = stringResource(R.string.label_work_id, currentWorkId),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    if (activeWorkInfo != null) {
+                        Text(
+                            text = stringResource(
+                                R.string.label_work_info,
+                                activeWorkInfo.model,
+                                activeWorkInfo.serial,
+                                activeWorkInfo.process
+                            ),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    val qrStateLabel = if (!qrModel.isNullOrBlank() && !qrSerial.isNullOrBlank()) {
+                        stringResource(R.string.pill_qr_ready)
+                    } else {
+                        stringResource(R.string.pill_qr_missing)
+                    }
+                    StatusPill(
+                        text = stringResource(R.string.label_qr_status, qrStateLabel),
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            modifier = Modifier.weight(1f),
+                            onClick = onScanQr
+                        ) {
+                            Text(stringResource(R.string.action_scan_qr))
+                        }
+                        OutlinedButton(
+                            modifier = Modifier.weight(1f),
+                            onClick = onClearQr
+                        ) {
+                            Text(stringResource(R.string.action_clear_qr))
+                        }
+                    }
+                    OutlinedTextField(
+                        modifier = Modifier.fillMaxWidth(),
+                        value = qrModel.orEmpty(),
+                        onValueChange = {},
+                        label = { Text(stringResource(R.string.hint_model)) },
+                        placeholder = { Text(stringResource(R.string.label_qr_unscanned)) },
+                        readOnly = true,
+                        singleLine = true
+                    )
+                    OutlinedTextField(
+                        modifier = Modifier.fillMaxWidth(),
+                        value = qrSerial.orEmpty(),
+                        onValueChange = {},
+                        label = { Text(stringResource(R.string.hint_serial)) },
+                        placeholder = { Text(stringResource(R.string.label_qr_unscanned)) },
+                        readOnly = true,
+                        singleLine = true
+                    )
+                    if (qrMessage != null) {
+                        Text(
+                            text = qrMessage,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    val processStateLabel = when (processSource) {
+                        ProcessSource.LIVE -> stringResource(R.string.pill_process_live)
+                        ProcessSource.CACHE -> stringResource(R.string.pill_process_cached)
+                        ProcessSource.TEMPORARY -> stringResource(R.string.pill_process_temporary)
+                        ProcessSource.UNKNOWN_ONLY -> stringResource(R.string.pill_process_unknown)
+                        ProcessSource.NONE -> stringResource(R.string.pill_process_missing)
+                    }
+                    StatusPill(
+                        text = stringResource(R.string.label_process_status, processStateLabel),
+                        containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onTertiaryContainer
+                    )
+                    val selectedProcessLabel = selectedProcess?.let {
+                        "${it.id} ${it.name}"
+                    } ?: stringResource(R.string.label_process_unselected)
+                    OutlinedTextField(
+                        modifier = Modifier.fillMaxWidth(),
+                        value = selectedProcessLabel,
+                        onValueChange = {},
+                        label = { Text(stringResource(R.string.label_process)) },
+                        readOnly = true,
+                        singleLine = true
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            modifier = Modifier.weight(1f),
+                            onClick = onFetchProcesses
+                        ) {
+                            Text(stringResource(R.string.action_process_fetch))
+                        }
+                        OutlinedButton(
+                            modifier = Modifier.weight(1f),
+                            onClick = onSelectProcess
+                        ) {
+                            Text(stringResource(R.string.action_process_select))
+                        }
+                    }
+                    OutlinedTextField(
+                        modifier = Modifier.fillMaxWidth(),
+                        value = processApiUrl,
+                        onValueChange = onProcessApiUrlChange,
+                        label = { Text(stringResource(R.string.label_process_api_url)) },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                        keyboardActions = KeyboardActions(
+                            onDone = { focusManager.clearFocus() }
+                        )
+                    )
+                    if (processMessage != null) {
+                        Text(
+                            text = processMessage,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            modifier = Modifier.weight(1f),
+                            onClick = onWorkStart,
+                            enabled = canStartWork
+                        ) {
+                            Text(stringResource(R.string.action_work_start))
+                        }
+                        OutlinedButton(
+                            modifier = Modifier.weight(1f),
+                            onClick = onWorkPause,
+                            enabled = workState == WorkUiState.ACTIVE
+                        ) {
+                            Text(stringResource(R.string.action_work_pause))
+                        }
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            modifier = Modifier.weight(1f),
+                            onClick = onWorkResume,
+                            enabled = workState == WorkUiState.PAUSED
+                        ) {
+                            Text(stringResource(R.string.action_work_resume))
+                        }
+                        Button(
+                            modifier = Modifier.weight(1f),
+                            onClick = onWorkEnd,
+                            enabled = workState != WorkUiState.NONE
+                        ) {
+                            Text(stringResource(R.string.action_work_end))
+                        }
+                    }
+                    if (workMessage != null) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.secondaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Text(
+                                text = workMessage,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                    }
+                }
+            }
+
             Card(
                 shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
@@ -782,7 +1383,7 @@ internal fun UvcPreviewScreenContent(
                             enabled = isCameraOpened && !isFinalizing,
                             colors = recordButtonColors
                         ) {
-                            val recordText = if (isRecording) {
+                            val recordText = if (isRecordingSession) {
                                 stringResource(R.string.action_stop)
                             } else {
                                 stringResource(R.string.action_record)
@@ -828,7 +1429,7 @@ private fun RecordingListScreen(
     onBack: () -> Unit,
     onPlay: (RecordingItem) -> Unit,
     recordingPath: String?,
-    isRecording: Boolean,
+    isSegmentRecording: Boolean,
     isFinalizing: Boolean
 ) {
     val context = LocalContext.current
@@ -965,7 +1566,7 @@ private fun RecordingListScreen(
                         val isLocked =
                             recordingPath != null &&
                                 recordingPath == item.path &&
-                                (isRecording || isFinalizing)
+                                (isSegmentRecording || isFinalizing)
                         val isPlayable = !isLocked
                         Card(
                             modifier = Modifier
@@ -1012,7 +1613,7 @@ private fun PlaybackScreen(
     item: RecordingItem,
     onBack: () -> Unit,
     recordingPath: String?,
-    isRecording: Boolean,
+    isSegmentRecording: Boolean,
     isFinalizing: Boolean
 ) {
     val context = LocalContext.current
@@ -1031,7 +1632,7 @@ private fun PlaybackScreen(
     val isRecordingSegment =
         recordingPath != null &&
             recordingPath == item.path &&
-            (isRecording || isFinalizing)
+            (isSegmentRecording || isFinalizing)
 
     LaunchedEffect(item.path, isRecordingSegment) {
         if (isRecordingSegment) {

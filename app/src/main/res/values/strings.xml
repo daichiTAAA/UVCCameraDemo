@@ -10,6 +10,18 @@
     <string name="label_devices">デバイス</string>
     <string name="label_recordings">録画一覧</string>
     <string name="label_recordings_subtitle">保存したクリップ</string>
+    <string name="label_work">作業</string>
+    <string name="label_work_status">作業状態: %1$s</string>
+    <string name="label_work_id">作業ID: %1$s</string>
+    <string name="label_work_info">型式 %1$s / 機番 %2$s / 工程 %3$s</string>
+    <string name="label_qr_status">QR: %1$s</string>
+    <string name="label_qr_unscanned">未読み取り</string>
+    <string name="label_process">工程</string>
+    <string name="label_process_status">工程: %1$s</string>
+    <string name="label_process_unselected">未選択</string>
+    <string name="label_process_empty">工程候補がありません</string>
+    <string name="label_process_api_url">工程API URL</string>
+    <string name="label_qr_scan">QRコードを読み取ってください</string>
     <string name="label_no_devices">UVCデバイスがありません</string>
     <string name="label_no_recordings">録画はありません</string>
     <string name="label_device_details">ID=%1$s VID=%2$d PID=%3$d</string>
@@ -39,6 +51,15 @@
     <string name="action_cancel">キャンセル</string>
     <string name="action_fullscreen">全画面</string>
     <string name="action_exit">終了</string>
+    <string name="action_work_start">作業開始</string>
+    <string name="action_work_pause">中断</string>
+    <string name="action_work_resume">再開</string>
+    <string name="action_work_end">終了</string>
+    <string name="action_scan_qr">QR読取</string>
+    <string name="action_clear_qr">クリア</string>
+    <string name="action_process_fetch">工程取得</string>
+    <string name="action_process_select">工程選択</string>
+    <string name="action_request_permission">許可する</string>
 
     <string name="status_preview_mode">プレビュー表示中</string>
     <string name="status_idle">待機中</string>
@@ -69,12 +90,42 @@
     <string name="pill_camera_closed">未接続</string>
     <string name="pill_record_finalizing">保存処理中...</string>
     <string name="pill_recording_with_time">録画中 %1$s</string>
+    <string name="pill_work_none">未開始</string>
+    <string name="pill_work_active">作業中</string>
+    <string name="pill_work_paused">中断中</string>
     <string name="pill_preparing">準備中...</string>
     <string name="pill_system_player">システム再生</string>
+    <string name="pill_qr_ready">読み取り済み</string>
+    <string name="pill_qr_missing">未読み取り</string>
+    <string name="pill_process_live">取得済み</string>
+    <string name="pill_process_cached">キャッシュ</string>
+    <string name="pill_process_temporary">暫定</string>
+    <string name="pill_process_unknown">UNKNOWN</string>
+    <string name="pill_process_missing">未取得</string>
+
+    <string name="hint_model">型式</string>
+    <string name="hint_serial">機番</string>
+    <string name="hint_process">工程</string>
 
     <string name="dialog_delete_title">録画を削除しますか？</string>
     <string name="message_deleted">削除しました: %1$s</string>
     <string name="message_delete_failed">削除に失敗しました</string>
+    <string name="message_work_input_required">型式・機番・工程を入力してください</string>
+    <string name="message_work_started">作業を開始しました</string>
+    <string name="message_work_paused">作業を中断しました</string>
+    <string name="message_work_resumed">作業を再開しました</string>
+    <string name="message_work_ended">作業を終了しました</string>
+    <string name="message_work_qr_required">QRを読み取ってください</string>
+    <string name="message_work_process_required">工程を選択してください</string>
+    <string name="message_qr_parse_failed">QRコードから型式/機番を取得できません</string>
+    <string name="message_qr_scanned">QRコードを読み取りました</string>
+    <string name="message_qr_cleared">QRコードをクリアしました</string>
+    <string name="message_process_fetch_success">工程を取得しました</string>
+    <string name="message_process_fetch_failed_cache">取得に失敗しました。キャッシュを使用します</string>
+    <string name="message_process_fetch_failed_unknown">取得に失敗しました。UNKNOWNで選択してください</string>
+    <string name="message_process_selection_invalid">選択済み工程が候補にないため解除しました</string>
+    <string name="message_process_api_url_required">工程API URLを入力してください</string>
+    <string name="message_camera_permission_required">カメラ権限が必要です</string>
 
     <string name="error_exoplayer">ExoPlayerエラー: %1$s</string>
     <string name="error_hevc_encoder_unavailable">HEVCエンコーダーが利用できません</string>
@@ -87,4 +138,6 @@
 
     <string name="preview_device_uvc">UVCカメラ</string>
     <string name="preview_device_usb_capture">USBキャプチャ</string>
+
+    <string name="dialog_process_select_title">工程を選択</string>
 </resources>
