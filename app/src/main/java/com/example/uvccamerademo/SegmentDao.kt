@@ -40,10 +40,16 @@ interface SegmentDao {
     @Query("SELECT * FROM segments WHERE segmentUuid = :segmentUuid")
     suspend fun findById(segmentUuid: String): SegmentEntity?
 
+    @Query("SELECT * FROM segments WHERE path = :path LIMIT 1")
+    suspend fun findByPath(path: String): SegmentEntity?
+
     @Query(
         """
-        SELECT segments.workId AS workId,
+        SELECT segments.segmentUuid AS segmentUuid,
+               segments.recordedAt AS recordedAt,
+               segments.workId AS workId,
                segments.segmentIndex AS segmentIndex,
+               segments.uploadState AS uploadState,
                works.model AS model,
                works.serial AS serial,
                works.process AS process
@@ -54,6 +60,26 @@ interface SegmentDao {
         """
     )
     suspend fun findMetadataByPath(path: String): SegmentMetadata?
+
+    @Query("SELECT * FROM segments WHERE workId = :workId ORDER BY recordedAt ASC")
+    suspend fun listByWork(workId: String): List<SegmentEntity>
+
+    @Query(
+        """
+        UPDATE segments
+        SET workId = :workId,
+            uploadState = :uploadState
+        WHERE segmentUuid = :segmentUuid
+        """
+    )
+    suspend fun assignWork(
+        segmentUuid: String,
+        workId: String,
+        uploadState: UploadState
+    )
+
+    @Query("UPDATE segments SET segmentIndex = :segmentIndex WHERE segmentUuid = :segmentUuid")
+    suspend fun updateSegmentIndex(segmentUuid: String, segmentIndex: Int)
 
     @Query(
         """

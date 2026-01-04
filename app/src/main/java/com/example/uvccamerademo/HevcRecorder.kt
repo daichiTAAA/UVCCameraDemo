@@ -24,6 +24,7 @@ class HevcRecorder(
     private val width: Int,
     private val height: Int,
     private val outputFile: File,
+    private val videoMimeType: String,
     private val callback: ICaptureCallBack
 ) {
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -62,9 +63,9 @@ class HevcRecorder(
         try {
             prepareOutputFile()
             muxer = MediaMuxer(outputFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
-            videoCodec = createVideoEncoder()
+            videoCodec = createVideoEncoder(videoMimeType)
             if (videoCodec == null) {
-                reportError(context.getString(R.string.error_hevc_encoder_unavailable))
+                reportError(context.getString(R.string.error_video_encoder_unavailable))
                 return false
             }
             isAudioEnabled = initAudioEncoder()
@@ -127,8 +128,7 @@ class HevcRecorder(
         }
     }
 
-    private fun createVideoEncoder(): MediaCodec? {
-        val mime = MediaFormat.MIMETYPE_VIDEO_HEVC
+    private fun createVideoEncoder(mime: String): MediaCodec? {
         val codecInfo = selectCodec(mime) ?: return null
         val format = MediaFormat.createVideoFormat(mime, width, height)
         videoColorFormat = selectColorFormat(codecInfo, mime)

@@ -52,9 +52,12 @@ data class SegmentEntity(
 )
 
 data class SegmentMetadata(
+    val segmentUuid: String?,
+    val recordedAt: Long?,
     val workId: String?,
     val segmentIndex: Int?,
     val model: String?,
     val serial: String?,
-    val process: String?
+    val process: String?,
+    val uploadState: UploadState?
 )

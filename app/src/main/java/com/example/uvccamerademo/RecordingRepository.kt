@@ -6,6 +6,7 @@ import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaMuxer
 import android.media.MediaMetadataRetriever
+import androidx.room.withTransaction
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -22,11 +23,23 @@ data class RecordingItem(
     val createdAt: Long,
     val sizeBytes: Long,
     val durationMs: Long,
+    val segmentUuid: String? = null,
     val workId: String? = null,
     val segmentIndex: Int? = null,
     val model: String? = null,
     val serial: String? = null,
-    val process: String? = null
+    val process: String? = null,
+    val uploadState: UploadState? = null
+)
+
+data class WorkGroup(
+    val work: WorkEntity,
+    val segments: List<RecordingItem>
+)
+
+data class RecordingGroups(
+    val unassigned: List<RecordingItem>,
+    val workGroups: List<WorkGroup>
 )
 
 class RecordingRepository(context: Context) {
@@ -138,6 +151,47 @@ class RecordingRepository(context: Context) {
             .sortedByDescending { it.createdAt }
     }
 
+    suspend fun loadRecordingGroups(): RecordingGroups = withContext(Dispatchers.IO) {
+        val recordings = loadRecordings()
+        val works = workDao.listAll().associateBy { it.workId }
+        val (assigned, unassignedRaw) = recordings.partition { !it.workId.isNullOrBlank() }
+        val (assignedWithWork, orphaned) = assigned.partition { works.containsKey(it.workId) }
+        val unassigned = (unassignedRaw + orphaned).sortedBy { it.createdAt }
+        val workGroups = assignedWithWork
+            .groupBy { it.workId!! }
+            .mapNotNull { (workId, items) ->
+                val work = works[workId] ?: return@mapNotNull null
+                WorkGroup(work = work, segments = items.sortedBy { it.createdAt })
+            }
+            .sortedByDescending { it.work.startedAt }
+        RecordingGroups(unassigned = unassigned, workGroups = workGroups)
+    }
+
+    suspend fun loadWorks(): List<WorkEntity> = withContext(Dispatchers.IO) {
+        workDao.listAll()
+    }
+
+    suspend fun assignSegmentToWork(segmentUuid: String, workId: String): Boolean {
+        return withContext(Dispatchers.IO) {
+            database.withTransaction {
+                val target = segmentDao.findById(segmentUuid) ?: return@withTransaction false
+                if (target.workId == workId) {
+                    return@withTransaction true
+                }
+                segmentDao.assignWork(segmentUuid, workId, UploadState.PENDING)
+                val segments = segmentDao.listByWork(workId)
+                segments.forEachIndexed { index, segment ->
+                    segmentDao.updateSegmentIndex(segment.segmentUuid, index + 1)
+                }
+                true
+            }
+        }.also { success ->
+            if (success) {
+                UploadScheduler.enqueueImmediate(appContext)
+            }
+        }
+    }
+
     suspend fun prepareForPlayback(item: RecordingItem): RecordingItem = withContext(Dispatchers.IO) {
         val normalized = normalizeExtension(File(item.path))
         if (shouldWaitForFinalize(normalized)) {
@@ -173,35 +227,43 @@ class RecordingRepository(context: Context) {
     }
 
     private fun buildItem(file: File, metadata: SegmentMetadata?): RecordingItem {
+        val createdAt = metadata?.recordedAt ?: file.lastModified()
         return RecordingItem(
             path = file.absolutePath,
             name = file.name,
-            createdAt = file.lastModified(),
+            createdAt = createdAt,
             sizeBytes = file.length(),
             durationMs = readDurationMs(file),
+            segmentUuid = metadata?.segmentUuid,
             workId = metadata?.workId,
             segmentIndex = metadata?.segmentIndex,
             model = metadata?.model,
             serial = metadata?.serial,
-            process = metadata?.process
+            process = metadata?.process,
+            uploadState = metadata?.uploadState
         )
     }
 
     private fun metadataFromItem(item: RecordingItem): SegmentMetadata? {
-        if (item.workId == null &&
+        if (item.segmentUuid == null &&
+            item.workId == null &&
             item.segmentIndex == null &&
             item.model == null &&
             item.serial == null &&
-            item.process == null
+            item.process == null &&
+            item.uploadState == null
         ) {
             return null
         }
         return SegmentMetadata(
+            segmentUuid = item.segmentUuid,
+            recordedAt = item.createdAt,
             workId = item.workId,
             segmentIndex = item.segmentIndex,
             model = item.model,
             serial = item.serial,
-            process = item.process
+            process = item.process,
+            uploadState = item.uploadState
         )
     }
 

@@ -23,6 +23,17 @@
     <string name="label_process_unselected">未選択</string>
     <string name="label_process_empty">工程候補がありません</string>
     <string name="label_process_api_url">API URL</string>
+    <string name="label_settings">設定</string>
+    <string name="label_segment_interval">セグメント分割間隔（分）</string>
+    <string name="label_segment_interval_value">現在: %1$d 分</string>
+    <string name="label_codec">録画コーデック</string>
+    <string name="label_codec_hevc">H.265 (HEVC)</string>
+    <string name="label_codec_avc">H.264 (AVC)</string>
+    <string name="label_work_group_unassigned">未割当セグメント</string>
+    <string name="label_work_period">開始 %1$s / 終了 %2$s</string>
+    <string name="label_work_in_progress">進行中</string>
+    <string name="label_work_segment_count">セグメント数: %1$d</string>
+    <string name="label_no_work_available">作業がありません</string>
     <string name="label_qr_scan">QRコードを読み取ってください</string>
     <string name="label_no_devices">UVCデバイスがありません</string>
     <string name="label_no_recordings">録画はありません</string>
@@ -62,6 +73,7 @@
     <string name="action_process_fetch">工程取得</string>
     <string name="action_process_select">工程選択</string>
     <string name="action_request_permission">許可する</string>
+    <string name="action_assign">割当</string>
 
     <string name="status_preview_mode">プレビュー表示中</string>
     <string name="status_idle">待機中</string>
@@ -130,9 +142,13 @@
     <string name="message_process_selection_invalid">選択済み工程が候補にないため解除しました</string>
     <string name="message_process_api_url_required">API URLを入力してください</string>
     <string name="message_camera_permission_required">カメラ権限が必要です</string>
+    <string name="message_setting_next_segment">変更は次セグメントから反映されます</string>
+    <string name="message_assign_success">作業に割り当てました</string>
+    <string name="message_assign_failed">割り当てに失敗しました</string>
 
     <string name="error_exoplayer">ExoPlayerエラー: %1$s</string>
     <string name="error_hevc_encoder_unavailable">HEVCエンコーダーが利用できません</string>
+    <string name="error_video_encoder_unavailable">ビデオエンコーダーが利用できません</string>
     <string name="error_record_start_failed">開始に失敗しました: %1$s</string>
     <string name="error_repairing">ファイルを修復中...</string>
     <string name="error_playback_failed">再生に失敗: %1$s</string>
@@ -144,4 +160,5 @@
     <string name="preview_device_usb_capture">USBキャプチャ</string>
 
     <string name="dialog_process_select_title">工程を選択</string>
+    <string name="dialog_assign_title">作業に割当て</string>
 </resources>

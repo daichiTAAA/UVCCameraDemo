@@ -50,6 +50,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -105,6 +106,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
+import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -275,11 +277,16 @@ private fun UvcPreviewScreen(
     var pendingRecord by remember { mutableStateOf(false) }
     var recorder by remember { mutableStateOf<HevcRecorder?>(null) }
     var currentSegmentUuid by remember { mutableStateOf<String?>(null) }
+    var activeSegmentIntervalMs by remember { mutableStateOf<Long?>(null) }
     var pendingSegmentWorkId by remember { mutableStateOf<String?>(null) }
     var workState by remember { mutableStateOf(WorkUiState.NONE) }
     var currentWorkId by remember { mutableStateOf<String?>(null) }
     var activeWorkInfo by remember { mutableStateOf<WorkInfo?>(null) }
     var workMessage by remember { mutableStateOf<String?>(null) }
+    var segmentIntervalMinutes by remember {
+        mutableStateOf(SettingsRepository.DEFAULT_SEGMENT_INTERVAL_MINUTES)
+    }
+    var selectedVideoCodec by remember { mutableStateOf(VideoCodec.HEVC) }
     var qrModel by rememberSaveable { mutableStateOf<String?>(null) }
     var qrSerial by rememberSaveable { mutableStateOf<String?>(null) }
     var qrMessage by remember { mutableStateOf<String?>(null) }
@@ -306,6 +313,7 @@ private fun UvcPreviewScreen(
     }
 
     val processRepository = remember { ProcessRepository(context) }
+    val settingsRepository = remember { SettingsRepository(context) }
     var processItems by remember { mutableStateOf<List<ProcessItem>>(emptyList()) }
     var processSource by remember { mutableStateOf(ProcessSource.NONE) }
     var selectedProcess by remember { mutableStateOf<ProcessItem?>(null) }
@@ -376,6 +384,7 @@ private fun UvcPreviewScreen(
             isSegmentRecording = false
             recorder?.stop()
             isFinalizing = true
+            activeSegmentIntervalMs = null
             statusMessage = context.getString(R.string.status_record_stopping)
         }
     }
@@ -402,6 +411,11 @@ private fun UvcPreviewScreen(
         }
         val segmentUuid = UUID.randomUUID().toString()
         val recordedAt = System.currentTimeMillis()
+        val normalizedInterval = segmentIntervalMinutes.coerceIn(
+            SettingsRepository.MIN_SEGMENT_INTERVAL_MINUTES,
+            SettingsRepository.MAX_SEGMENT_INTERVAL_MINUTES
+        )
+        activeSegmentIntervalMs = normalizedInterval * 60_000L
         isFinalizing = false
         currentRecordingPath = file.absolutePath
         currentSegmentUuid = segmentUuid
@@ -431,6 +445,7 @@ private fun UvcPreviewScreen(
                     recorder = null
                     currentRecordingPath = null
                     currentSegmentUuid = null
+                    activeSegmentIntervalMs = null
                     pendingSegmentWorkId = null
                     statusMessage = context.getString(
                         R.string.status_recording_failed,
@@ -454,6 +469,7 @@ private fun UvcPreviewScreen(
                     recorder = null
                     currentRecordingPath = null
                     currentSegmentUuid = null
+                    activeSegmentIntervalMs = null
                     statusMessage = context.getString(
                         R.string.status_saved,
                         finishedPath ?: context.getString(R.string.label_unknown_path)
@@ -479,12 +495,14 @@ private fun UvcPreviewScreen(
             width = selectedResolution.width,
             height = selectedResolution.height,
             outputFile = file,
+            videoMimeType = selectedVideoCodec.mimeType,
             callback = callback
         )
         if (!createdRecorder.start()) {
             statusMessage = context.getString(R.string.status_record_start_failed)
             currentRecordingPath = null
             currentSegmentUuid = null
+            activeSegmentIntervalMs = null
             isRecordingSession = false
             pendingSegmentWorkId = null
             return
@@ -805,6 +823,8 @@ private fun UvcPreviewScreen(
             processItems = cache.items
             processSource = ProcessSource.CACHE
         }
+        segmentIntervalMinutes = settingsRepository.loadSegmentIntervalMinutes()
+        selectedVideoCodec = settingsRepository.loadVideoCodec()
         val selected = selectedProcess
         if (selected != null && processItems.isNotEmpty() && processItems.none { it.id == selected.id }) {
             selectedProcess = null
@@ -838,6 +858,30 @@ private fun UvcPreviewScreen(
             }
         } else {
             recordingElapsedMs = 0L
+        }
+    }
+
+    LaunchedEffect(
+        isSegmentRecording,
+        currentSegmentUuid,
+        activeSegmentIntervalMs,
+        isRecordingSession,
+        recordingStartAt
+    ) {
+        val intervalMs = activeSegmentIntervalMs ?: return@LaunchedEffect
+        val segmentId = currentSegmentUuid ?: return@LaunchedEffect
+        val startedAt = recordingStartAt ?: return@LaunchedEffect
+        if (!isSegmentRecording || !isRecordingSession) {
+            return@LaunchedEffect
+        }
+        val elapsed = System.currentTimeMillis() - startedAt
+        val remaining = intervalMs - elapsed
+        if (remaining > 0L) {
+            delay(remaining)
+        }
+        if (isRecordingSession && isSegmentRecording && currentSegmentUuid == segmentId) {
+            val nextWorkId = if (workState == WorkUiState.ACTIVE) currentWorkId else null
+            requestSegmentBoundary(nextWorkId)
         }
     }
 
@@ -987,6 +1031,22 @@ private fun UvcPreviewScreen(
             onProcessApiUrlChange = { processApiUrl = it },
             onFetchProcesses = { refreshProcesses() },
             onSelectProcess = { showProcessDialog = true },
+            segmentIntervalMinutes = segmentIntervalMinutes,
+            onSegmentIntervalChange = { minutes ->
+                segmentIntervalMinutes = minutes
+            },
+            onSegmentIntervalChangeFinished = {
+                scope.launch {
+                    settingsRepository.saveSegmentIntervalMinutes(segmentIntervalMinutes)
+                }
+            },
+            selectedVideoCodec = selectedVideoCodec,
+            onVideoCodecChange = { codec ->
+                selectedVideoCodec = codec
+                scope.launch {
+                    settingsRepository.saveVideoCodec(codec)
+                }
+            },
             onWorkStart = { handleStartWork() },
             onWorkPause = { handlePauseWork() },
             onWorkResume = { handleResumeWork() },
@@ -1031,6 +1091,11 @@ internal fun UvcPreviewScreenContent(
     onProcessApiUrlChange: (String) -> Unit,
     onFetchProcesses: () -> Unit,
     onSelectProcess: () -> Unit,
+    segmentIntervalMinutes: Int,
+    onSegmentIntervalChange: (Int) -> Unit,
+    onSegmentIntervalChangeFinished: () -> Unit,
+    selectedVideoCodec: VideoCodec,
+    onVideoCodecChange: (VideoCodec) -> Unit,
     onWorkStart: () -> Unit,
     onWorkPause: () -> Unit,
     onWorkResume: () -> Unit,
@@ -1419,6 +1484,76 @@ internal fun UvcPreviewScreenContent(
                 shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
             ) {
+                val minInterval = SettingsRepository.MIN_SEGMENT_INTERVAL_MINUTES
+                val maxInterval = SettingsRepository.MAX_SEGMENT_INTERVAL_MINUTES
+                val coercedInterval = segmentIntervalMinutes.coerceIn(minInterval, maxInterval)
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text(
+                        text = stringResource(R.string.label_settings),
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                    Text(
+                        text = stringResource(R.string.label_segment_interval),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = stringResource(R.string.label_segment_interval_value, coercedInterval),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Slider(
+                        value = coercedInterval.toFloat(),
+                        onValueChange = { raw ->
+                            val rounded = raw.roundToInt().coerceIn(minInterval, maxInterval)
+                            onSegmentIntervalChange(rounded)
+                        },
+                        onValueChangeFinished = onSegmentIntervalChangeFinished,
+                        valueRange = minInterval.toFloat()..maxInterval.toFloat(),
+                        steps = maxInterval - minInterval - 1
+                    )
+                    Text(
+                        text = stringResource(R.string.label_codec),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        val isHevc = selectedVideoCodec == VideoCodec.HEVC
+                        val isAvc = selectedVideoCodec == VideoCodec.AVC
+                        if (isHevc) {
+                            Button(onClick = { onVideoCodecChange(VideoCodec.HEVC) }) {
+                                Text(stringResource(VideoCodec.HEVC.labelRes))
+                            }
+                        } else {
+                            OutlinedButton(onClick = { onVideoCodecChange(VideoCodec.HEVC) }) {
+                                Text(stringResource(VideoCodec.HEVC.labelRes))
+                            }
+                        }
+                        if (isAvc) {
+                            Button(onClick = { onVideoCodecChange(VideoCodec.AVC) }) {
+                                Text(stringResource(VideoCodec.AVC.labelRes))
+                            }
+                        } else {
+                            OutlinedButton(onClick = { onVideoCodecChange(VideoCodec.AVC) }) {
+                                Text(stringResource(VideoCodec.AVC.labelRes))
+                            }
+                        }
+                    }
+                    Text(
+                        text = stringResource(R.string.message_setting_next_segment),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
                 Column(
                     modifier = Modifier.padding(14.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -1486,6 +1621,145 @@ private fun StatusPill(
     }
 }
 
+@Composable
+private fun RecordingGroupHeader(title: String) {
+    Surface(
+        color = MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Text(
+            text = title,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            style = MaterialTheme.typography.titleSmall
+        )
+    }
+}
+
+@Composable
+private fun WorkHeaderCard(work: WorkEntity, segmentCount: Int) {
+    Card(
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Text(
+                text = stringResource(
+                    R.string.label_work_info,
+                    work.model,
+                    work.serial,
+                    work.process
+                ),
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                text = stringResource(R.string.label_work_id, work.workId),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = stringResource(
+                    R.string.label_work_period,
+                    formatDateTime(work.startedAt),
+                    work.endedAt?.let { formatDateTime(it) }
+                        ?: stringResource(R.string.label_work_in_progress)
+                ),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = stringResource(R.string.label_work_segment_count, segmentCount),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+private fun RecordingItemCard(
+    item: RecordingItem,
+    isLocked: Boolean,
+    onPlay: (RecordingItem) -> Unit,
+    onDelete: (RecordingItem) -> Unit,
+    onAssign: (() -> Unit)?
+) {
+    val isPlayable = !isLocked
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(enabled = isPlayable) { onPlay(item) },
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Text(text = item.name, fontWeight = FontWeight.SemiBold)
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = stringResource(
+                    R.string.format_recording_meta,
+                    formatDateTime(item.createdAt),
+                    formatFileSize(item.sizeBytes),
+                    formatDuration(item.durationMs)
+                ),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            val workLabel = if (item.workId.isNullOrBlank()) {
+                stringResource(R.string.label_work_unassigned)
+            } else {
+                stringResource(R.string.label_work_id, item.workId)
+            }
+            Text(
+                text = workLabel,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            if (item.segmentIndex != null) {
+                Text(
+                    text = stringResource(R.string.label_segment_index, item.segmentIndex),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            if (!item.model.isNullOrBlank() &&
+                !item.serial.isNullOrBlank() &&
+                !item.process.isNullOrBlank()
+            ) {
+                Text(
+                    text = stringResource(
+                        R.string.label_work_info,
+                        item.model,
+                        item.serial,
+                        item.process
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Spacer(modifier = Modifier.height(10.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = { onPlay(item) }, enabled = isPlayable) {
+                    Text(stringResource(R.string.action_play))
+                }
+                if (onAssign != null) {
+                    OutlinedButton(
+                        onClick = onAssign,
+                        enabled = item.segmentUuid != null
+                    ) {
+                        Text(stringResource(R.string.action_assign))
+                    }
+                }
+                OutlinedButton(onClick = { onDelete(item) }) {
+                    Text(stringResource(R.string.action_delete))
+                }
+            }
+        }
+    }
+}
+
 
 @Composable
 private fun RecordingListScreen(
@@ -1498,13 +1772,21 @@ private fun RecordingListScreen(
     isFinalizing: Boolean
 ) {
     val context = LocalContext.current
-    var recordings by remember { mutableStateOf(emptyList<RecordingItem>()) }
+    var recordingGroups by remember { mutableStateOf(RecordingGroups(emptyList(), emptyList())) }
     var message by remember { mutableStateOf<String?>(null) }
     var deleteTarget by remember { mutableStateOf<RecordingItem?>(null) }
+    var assignTarget by remember { mutableStateOf<RecordingItem?>(null) }
+    var availableWorks by remember { mutableStateOf<List<WorkEntity>>(emptyList()) }
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(Unit) {
-        recordings = repository.loadRecordings()
+        recordingGroups = repository.loadRecordingGroups()
+    }
+
+    LaunchedEffect(assignTarget) {
+        if (assignTarget != null) {
+            availableWorks = repository.loadWorks()
+        }
     }
 
     if (deleteTarget != null) {
@@ -1523,7 +1805,9 @@ private fun RecordingListScreen(
                             context.getString(R.string.message_delete_failed)
                         }
                         if (deleted) {
-                            recordings = recordings.filterNot { it.path == target.path }
+                            scope.launch {
+                                recordingGroups = repository.loadRecordingGroups()
+                            }
                         }
                         deleteTarget = null
                     }
@@ -1534,6 +1818,77 @@ private fun RecordingListScreen(
             dismissButton = {
                 TextButton(onClick = { deleteTarget = null }) {
                     Text(stringResource(R.string.action_cancel))
+                }
+            }
+        )
+    }
+
+    if (assignTarget != null) {
+        val target = assignTarget!!
+        AlertDialog(
+            onDismissRequest = { assignTarget = null },
+            title = { Text(stringResource(R.string.dialog_assign_title)) },
+            text = {
+                if (availableWorks.isEmpty()) {
+                    Text(stringResource(R.string.label_no_work_available))
+                } else {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 300.dp)
+                            .verticalScroll(rememberScrollState())
+                    ) {
+                        availableWorks.forEach { work ->
+                            TextButton(
+                                onClick = {
+                                    val segmentUuid = target.segmentUuid
+                                    if (segmentUuid == null) {
+                                        message = context.getString(R.string.message_assign_failed)
+                                        assignTarget = null
+                                        return@TextButton
+                                    }
+                                    scope.launch {
+                                        val success = repository.assignSegmentToWork(segmentUuid, work.workId)
+                                        message = if (success) {
+                                            context.getString(R.string.message_assign_success)
+                                        } else {
+                                            context.getString(R.string.message_assign_failed)
+                                        }
+                                        if (success) {
+                                            recordingGroups = repository.loadRecordingGroups()
+                                        }
+                                        assignTarget = null
+                                    }
+                                }
+                            ) {
+                                Column {
+                                    Text(
+                                        text = stringResource(
+                                            R.string.label_work_info,
+                                            work.model,
+                                            work.serial,
+                                            work.process
+                                        )
+                                    )
+                                    Text(
+                                        text = stringResource(
+                                            R.string.label_work_period,
+                                            formatDateTime(work.startedAt),
+                                            work.endedAt?.let { formatDateTime(it) }
+                                                ?: stringResource(R.string.label_work_in_progress)
+                                        ),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { assignTarget = null }) {
+                    Text(stringResource(R.string.action_close))
                 }
             }
         )
@@ -1589,7 +1944,7 @@ private fun RecordingListScreen(
                         onClick = {
                             message = null
                             scope.launch {
-                                recordings = repository.loadRecordings()
+                                recordingGroups = repository.loadRecordingGroups()
                             }
                         }
                     ) {
@@ -1610,7 +1965,9 @@ private fun RecordingListScreen(
                     )
                 }
             }
-            if (recordings.isEmpty()) {
+            val hasRecordings =
+                recordingGroups.unassigned.isNotEmpty() || recordingGroups.workGroups.isNotEmpty()
+            if (!hasRecordings) {
                 Surface(
                     color = MaterialTheme.colorScheme.surface,
                     shape = RoundedCornerShape(12.dp)
@@ -1627,74 +1984,42 @@ private fun RecordingListScreen(
                     modifier = Modifier.fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    items(recordings, key = { it.path }) { item ->
-                        val isLocked =
-                            recordingPath != null &&
-                                recordingPath == item.path &&
-                                (isSegmentRecording || isFinalizing)
-                        val isPlayable = !isLocked
-                        Card(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable(enabled = isPlayable) { onPlay(item) },
-                            shape = RoundedCornerShape(16.dp),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-                        ) {
-                            Column(modifier = Modifier.padding(14.dp)) {
-                                Text(text = item.name, fontWeight = FontWeight.SemiBold)
-                                Spacer(modifier = Modifier.height(6.dp))
-                                Text(
-                                    text = stringResource(
-                                        R.string.format_recording_meta,
-                                        formatDateTime(item.createdAt),
-                                        formatFileSize(item.sizeBytes),
-                                        formatDuration(item.durationMs)
-                                    ),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                val workLabel = if (item.workId.isNullOrBlank()) {
-                                    stringResource(R.string.label_work_unassigned)
-                                } else {
-                                    stringResource(R.string.label_work_id, item.workId)
-                                }
-                                Text(
-                                    text = workLabel,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                if (item.segmentIndex != null) {
-                                    Text(
-                                        text = stringResource(R.string.label_segment_index, item.segmentIndex),
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                                if (!item.model.isNullOrBlank() &&
-                                    !item.serial.isNullOrBlank() &&
-                                    !item.process.isNullOrBlank()
-                                ) {
-                                    Text(
-                                        text = stringResource(
-                                            R.string.label_work_info,
-                                            item.model,
-                                            item.serial,
-                                            item.process
-                                        ),
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                                Spacer(modifier = Modifier.height(10.dp))
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Button(onClick = { onPlay(item) }, enabled = isPlayable) {
-                                        Text(stringResource(R.string.action_play))
-                                    }
-                                    OutlinedButton(onClick = { deleteTarget = item }) {
-                                        Text(stringResource(R.string.action_delete))
-                                    }
-                                }
-                            }
+                    if (recordingGroups.unassigned.isNotEmpty()) {
+                        item {
+                            RecordingGroupHeader(
+                                title = stringResource(R.string.label_work_group_unassigned)
+                            )
+                        }
+                        items(recordingGroups.unassigned, key = { it.path }) { item ->
+                            val isLocked =
+                                recordingPath != null &&
+                                    recordingPath == item.path &&
+                                    (isSegmentRecording || isFinalizing)
+                            RecordingItemCard(
+                                item = item,
+                                isLocked = isLocked,
+                                onPlay = onPlay,
+                                onDelete = { deleteTarget = it },
+                                onAssign = { assignTarget = item }
+                            )
+                        }
+                    }
+                    recordingGroups.workGroups.forEach { group ->
+                        item(key = "work-${group.work.workId}") {
+                            WorkHeaderCard(work = group.work, segmentCount = group.segments.size)
+                        }
+                        items(group.segments, key = { it.path }) { item ->
+                            val isLocked =
+                                recordingPath != null &&
+                                    recordingPath == item.path &&
+                                    (isSegmentRecording || isFinalizing)
+                            RecordingItemCard(
+                                item = item,
+                                isLocked = isLocked,
+                                onPlay = onPlay,
+                                onDelete = { deleteTarget = it },
+                                onAssign = null
+                            )
                         }
                     }
                 }
